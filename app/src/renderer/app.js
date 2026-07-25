@@ -1,18 +1,25 @@
 "use strict";
 
 const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => [...document.querySelectorAll(sel)];
 const mainEl = $("#main");
+const audio = $("#audio");
 
 const state = {
+  page: "search",
   tab: "songs",
   results: { songs: [], albums: [], artists: [] },
   view: { type: "empty" },
-  /** ключ -> об'єкт треку; сам Set лише зберігає порядок вибору */
+  /** ключ -> об'єкт треку; Map, бо порядок вибору має значення */
   picked: new Map(),
-  settings: { outDir: "", format: "mp3" },
+  settings: { outDir: "", format: "m4a", watchClipboard: true, volume: 0.8 },
   jobs: new Map(),
   /** null або ідентифікатор пошуку, що зараз виконується (для «Стоп») */
   searchId: null,
+  library: { dir: "", tracks: [], missing: false, loaded: false, loading: false },
+  /** ключі «виконавець|назва» того, що вже лежить на диску */
+  owned: new Set(),
+  playing: null,
 };
 
 // ------------------------------------------------------------------ дрібниці
@@ -24,17 +31,41 @@ function esc(s) {
 }
 
 function dur(sec) {
-  if (!sec) return "";
+  if (!sec && sec !== 0) return "";
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-function size(bytesPerSec) {
+function speedStr(bytesPerSec) {
   if (!bytesPerSec) return "";
   const mb = bytesPerSec / 1048576;
   return mb >= 1 ? `${mb.toFixed(1)} МБ/с` : `${(bytesPerSec / 1024).toFixed(0)} КБ/с`;
 }
+
+function mbStr(bytes) {
+  return `${(bytes / 1048576).toFixed(1)} МБ`;
+}
+
+/**
+ * Українська множина: 1 трек, 2 треки, 5 треків.
+ * @param {number} n
+ * @param {[string, string, string]} forms — [один, два-чотири, багато]
+ */
+function plural(n, forms) {
+  const a = Math.abs(n) % 100;
+  const b = a % 10;
+  if (a > 10 && a < 20) return `${n} ${forms[2]}`;
+  if (b === 1) return `${n} ${forms[0]}`;
+  if (b >= 2 && b <= 4) return `${n} ${forms[1]}`;
+  return `${n} ${forms[2]}`;
+}
+
+const TRACKS = ["трек", "треки", "треків"];
+const FILES = ["файл", "файли", "файлів"];
+
+const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+const ownKey = (artist, title) => `${norm(artist)}|${norm(title)}`;
 
 function keyOf(it) {
   return `${it.source}:${it.id}`;
@@ -46,6 +77,7 @@ const SRC_NAME = {
   itunes: "iTunes",
   musicbrainz: "MusicBrainz",
   url: "посилання",
+  bridge: "не знайдено",
 };
 
 function badge(src) {
@@ -59,8 +91,13 @@ const BLANK =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="%2322222f"/><text x="32" y="41" font-size="26" text-anchor="middle" fill="%236a6a85">♫</text></svg>`,
   );
 
-function img(url, cls) {
-  return `<img class="${cls}" src="${esc(url || BLANK)}" alt="" />`;
+function img(url, cls, extra = "") {
+  return `<img class="${cls}" src="${esc(url || BLANK)}" alt="" ${extra} />`;
+}
+
+/** Локальний файл для тега <audio>: шлях Windows треба зробити валідним URL. */
+function fileUrl(p) {
+  return "file:///" + encodeURI(String(p).replace(/\\/g, "/")).replace(/#/g, "%23");
 }
 
 function loading(text) {
@@ -71,23 +108,53 @@ function fail(text) {
   mainEl.innerHTML = `<div class="note err">${esc(text)}</div>`;
 }
 
-// ------------------------------------------------------------------ малювання
+let toastTimer = null;
+function toast(text, actions = [], ms = 9000) {
+  $("#toastText").textContent = text;
+  $("#toastActs").innerHTML = actions
+    .map((a, i) => `<button data-toast="${i}" class="${a.primary ? "primary" : "ghost"}">${esc(a.label)}</button>`)
+    .join("");
+  $("#toastActs").onclick = (e) => {
+    const b = e.target.closest("[data-toast]");
+    if (!b) return;
+    hideToast();
+    actions[Number(b.dataset.toast)].run();
+  };
+  $("#toast").hidden = false;
+  clearTimeout(toastTimer);
+  if (ms) toastTimer = setTimeout(hideToast, ms);
+}
+function hideToast() {
+  clearTimeout(toastTimer);
+  $("#toast").hidden = true;
+}
+
+// ------------------------------------------------------------------ спільні шматки
+
+/** Реєстр усього, що зараз намальовано — щоб клік знав, з чим має справу. */
+const index = new Map();
+
+function reindex(...lists) {
+  for (const list of lists) for (const it of list || []) if (it) index.set(keyOf(it), it);
+}
 
 function songRow(s) {
   const k = keyOf(s);
   const on = state.picked.has(k);
+  const owned = state.owned.has(ownKey(s.artist, s.title));
+  const dead = s.missing || !s.url;
   return `
-    <div class="row${on ? " sel" : ""}" data-key="${esc(k)}">
-      <input type="checkbox" data-act="pick" ${on ? "checked" : ""} />
+    <div class="row${on ? " sel" : ""}${dead ? " dim" : ""}" data-key="${esc(k)}">
+      <input type="checkbox" data-act="pick" ${on ? "checked" : ""} ${dead ? "disabled" : ""} />
       ${img(s.thumb, "art")}
       <div class="name">
-        <b>${esc(s.title)}${badge(s.source)}</b>
+        <b>${esc(s.title)}${badge(s.missing ? "bridge" : s.source)}${owned ? `<span class="badge owned">вже є</span>` : ""}</b>
         <span class="sub">${esc(s.artist)}</span>
       </div>
       <div class="alb">${esc(s.album || "")}</div>
       <div class="dur">${dur(s.duration)}</div>
       <div class="act">
-        <button data-act="dl-one" class="primary">Завантажити</button>
+        ${dead ? "" : `<button data-act="dl-one" class="primary">ЗАБИРАЮ!</button>`}
       </div>
     </div>`;
 }
@@ -112,44 +179,37 @@ function artistCard(a) {
     </div>`;
 }
 
-/** Реєстр усього, що зараз намальовано — щоб клік знав, з чим має справу. */
-let index = new Map();
-
-function reindex(...lists) {
-  for (const list of lists) for (const it of list || []) index.set(keyOf(it), it);
-}
+// ------------------------------------------------------------------ сторінка «Шукач»
 
 function renderResults() {
   const r = state.results;
   reindex(r.songs, r.albums, r.artists);
 
   $("#tabs").hidden = false;
-  const tabs = document.querySelectorAll(".tab");
-  tabs.forEach((t) => {
+  $$(".tab").forEach((t) => {
     t.classList.toggle("active", t.dataset.tab === state.tab);
     t.querySelector(".cnt").textContent = r[t.dataset.tab].length;
   });
 
   const list = r[state.tab];
+  const head = state.results.note ? `<div class="note info">${esc(state.results.note)}</div>` : "";
+
   if (!list.length) {
-    mainEl.innerHTML = `<div class="empty"><div class="empty-ico">∅</div><p>Тут нічого не знайшлося. Спробуй іншу вкладку або інший запит.</p></div>`;
+    mainEl.innerHTML =
+      head + `<div class="empty"><div class="empty-ico">∅</div><p>Тут нічого не знайшлося. Спробуй іншу вкладку або інший запит.</p></div>`;
     return;
   }
 
-  if (state.tab === "songs") {
-    mainEl.innerHTML = `<div class="rows">${list.map(songRow).join("")}</div>`;
-  } else if (state.tab === "albums") {
-    mainEl.innerHTML = `<div class="grid">${list.map(albumCard).join("")}</div>`;
-  } else {
-    mainEl.innerHTML = `<div class="grid">${list.map(artistCard).join("")}</div>`;
-  }
+  if (state.tab === "songs") mainEl.innerHTML = head + `<div class="rows">${list.map(songRow).join("")}</div>`;
+  else if (state.tab === "albums") mainEl.innerHTML = head + `<div class="grid">${list.map(albumCard).join("")}</div>`;
+  else mainEl.innerHTML = head + `<div class="grid">${list.map(artistCard).join("")}</div>`;
 }
 
 function renderAlbum(a) {
   reindex(a.songs, [a]);
   $("#tabs").hidden = true;
-
   const canGrab = Boolean(a.url);
+
   mainEl.innerHTML = `
     <button class="ghost back" data-act="back">← Назад</button>
     <div class="detail-head">
@@ -157,10 +217,10 @@ function renderAlbum(a) {
       <div class="meta">
         <div class="sub">Альбом ${badge(a.source)}</div>
         <h1>${esc(a.title)}</h1>
-        <div class="sub">${esc([a.artist, a.year, `${a.songs.length} треків`].filter(Boolean).join(" · "))}</div>
+        <div class="sub">${esc([a.artist, a.year, plural(a.songs.length, TRACKS)].filter(Boolean).join(" · "))}</div>
         <div class="btns">
           <button class="primary" data-act="dl-album" data-key="${esc(keyOf(a))}" ${canGrab ? "" : "disabled"}>
-            Завантажити альбом
+            ЗАБИРАЮ ВЕСЬ АЛЬБОМ!
           </button>
           <button class="ghost" data-act="pick-all">Вибрати всі треки</button>
           ${a.artistId ? `<button class="ghost" data-act="open-artist-id" data-id="${esc(a.artistId)}">Виконавець</button>` : ""}
@@ -174,7 +234,6 @@ function renderAlbum(a) {
 function renderArtist(a) {
   reindex(a.topSongs, a.albums, a.singles, a.similar);
   $("#tabs").hidden = true;
-
   const sec = (title, html) => (html ? `<h3 class="sec">${title}</h3>${html}` : "");
   const grid = (items) => (items?.length ? `<div class="grid">${items.map(albumCard).join("")}</div>` : "");
 
@@ -185,9 +244,7 @@ function renderArtist(a) {
       <div class="meta">
         <div class="sub">Виконавець ${badge(a.source)}</div>
         <h1>${esc(a.name)}</h1>
-        <div class="btns">
-          <button class="ghost" data-act="pick-all">Вибрати популярні треки</button>
-        </div>
+        <div class="btns"><button class="ghost" data-act="pick-all">Вибрати популярні треки</button></div>
       </div>
     </div>
     ${sec("Популярні треки", a.topSongs?.length ? `<div class="rows">${a.topSongs.map(songRow).join("")}</div>` : "")}
@@ -209,30 +266,315 @@ function renderCatalogArtist(a, releases) {
         <div class="sub">${esc(a.subtitle || "")}</div>
       </div>
     </div>
-    <div class="note">Це дискографія з каталогу MusicBrainz — вона повніша за YouTube, але сам звук треба знайти. Клікни на альбом, і додаток пошукає його в YouTube&nbsp;Music.</div>
+    <div class="note">Дискографія з каталогу MusicBrainz — вона повніша за YouTube, але сам звук треба знайти. Клікни на альбом, і додаток пошукає його в YouTube&nbsp;Music.</div>
     ${releases.length ? `<div class="grid">${releases.map(albumCard).join("")}</div>` : `<div class="note">Релізів не знайдено.</div>`}`;
 }
 
+// ------------------------------------------------------------------ сторінка «Черга»
+
+function jobRow(j) {
+  const pct = Math.round(j.percent || 0);
+  const eq = `<span class="eq"><i></i><i></i><i></i><i></i></span>`;
+  let barCls = "";
+  let note = "";
+
+  if (j.status === "done") {
+    barCls = "done";
+    note = `<small class="ok">Готово · ${plural(j.files.length, FILES)}</small>`;
+  } else if (j.status === "error") {
+    barCls = "err";
+    note = `<small class="err">${esc(j.error || "помилка")}</small>`;
+  } else if (j.status === "canceled") {
+    note = `<small>Скасовано</small>`;
+  } else if (j.status === "retrying") {
+    barCls = "err";
+    note = `<small class="warn">${esc(j.error || "збій")} — чекаю і пробую ще раз…</small>`;
+  } else if (j.status === "queued") {
+    note = `<small>У черзі…</small>`;
+  } else {
+    const parts = [];
+    if (j.total > 1) parts.push(`трек ${j.index || 1} з ${j.total}`);
+    if (j.attempt) parts.push(`спроба ${j.attempt + 1}`);
+    if (j.phase === "process") parts.push("обробка: обкладинка й теги");
+    else if (j.speed) parts.push(speedStr(j.speed));
+    note = `<small>${eq}${esc(parts.join(" · ") || "починаю…")}</small>`;
+  }
+
+  const acts = [];
+  if (["active", "queued", "retrying"].includes(j.status))
+    acts.push(`<button data-jact="cancel" data-id="${j.id}">Стоп</button>`);
+  if (j.status === "error" || j.status === "canceled")
+    acts.push(`<button data-jact="retry" data-id="${j.id}">Ще раз</button>`);
+  if (j.status === "done" && j.files[0])
+    acts.push(`<button data-jact="reveal" data-id="${j.id}">Показати</button>`);
+
+  return `
+    <div class="job" data-id="${j.id}">
+      ${img(j.thumb, "art")}
+      <div class="jn"><b>${esc(j.title)}</b>${note}</div>
+      <div class="bar ${barCls}"><i data-w="${j.status === "queued" ? 0 : pct}"></i></div>
+      <div class="jact">${acts.join("")}</div>
+    </div>`;
+}
+
+function renderQueue() {
+  $("#tabs").hidden = true;
+  const list = [...state.jobs.values()].reverse();
+  mainEl.innerHTML = `
+    <div class="qhead">
+      <h1>Черга</h1>
+      <span class="grow"></span>
+      <button class="ghost" id="qOpen">Відкрити теку</button>
+      <button class="ghost" id="qClear">Прибрати завершені</button>
+    </div>
+    ${list.length ? list.map(jobRow).join("") : `<div class="note">Черга порожня. Знайди щось у Шукачі й тисни «ЗАБИРАЮ!».</div>`}`;
+  applyBars();
+}
+
+/** Ширину смужок задаємо через CSSOM: атрибут style блокує наша ж CSP. */
+function applyBars() {
+  for (const bar of mainEl.querySelectorAll(".bar > i")) bar.style.width = bar.dataset.w + "%";
+}
+
+function refreshQueueBadge() {
+  const busy = [...state.jobs.values()].filter((j) =>
+    ["active", "queued", "retrying"].includes(j.status),
+  ).length;
+  const badgeEl = $("#navQueue");
+  badgeEl.hidden = state.jobs.size === 0;
+  badgeEl.textContent = busy || state.jobs.size;
+  $("#netbar").hidden = busy === 0;
+}
+
+// ------------------------------------------------------------------ сторінка «Сховище»
+
+function libRow(t) {
+  const isPlaying = state.playing?.path === t.path;
+  return `
+    <div class="row${isPlaying ? " playing" : ""}" data-path="${esc(t.path)}">
+      <span></span>
+      ${img(null, "art", `data-cover="${esc(t.path)}"`)}
+      <div class="name">
+        <b>${esc(t.title)}</b>
+        <span class="sub">${esc(t.artist || "невідомий виконавець")}</span>
+      </div>
+      <div class="alb">${esc(t.album || "")}</div>
+      <div class="dur">${dur(t.duration)}</div>
+      <div class="act">
+        <button data-lact="play" class="primary">${isPlaying && !audio.paused ? "❚❚" : "▶"}</button>
+        <button data-lact="reveal" class="ghost">Показати</button>
+        <button data-lact="trash" class="ghost danger">У кошик</button>
+      </div>
+    </div>`;
+}
+
+function renderLibrary() {
+  $("#tabs").hidden = true;
+  const L = state.library;
+
+  if (L.loading) return loading("Читаю теги з файлів…");
+
+  const head = `
+    <div class="libhead">
+      <h1>Сховище</h1>
+      <span class="grow"></span>
+      <button class="ghost" id="libRescan">Оновити</button>
+      <button class="ghost" id="libOpen">Відкрити теку</button>
+    </div>
+    <div class="libhead"><span class="path">${esc(L.dir)}</span></div>`;
+
+  if (L.missing) {
+    mainEl.innerHTML = head + `<div class="note err">Теки не існує. Обери іншу в Налаштуваннях.</div>`;
+    return;
+  }
+  if (!L.tracks.length) {
+    mainEl.innerHTML =
+      head + `<div class="note">Тут поки порожньо. Усе, що завантажиш, з'явиться в цьому списку.</div>`;
+    return;
+  }
+
+  const total = L.tracks.reduce((a, t) => a + t.size, 0);
+  mainEl.innerHTML =
+    head +
+    `<div class="note">${plural(L.tracks.length, TRACKS)} · ${mbStr(total)}</div>` +
+    `<div class="rows">${L.tracks.map(libRow).join("")}</div>`;
+  loadCovers();
+}
+
+/** Обкладинки тягнемо лише для видимих рядків: інакше сотня файлів = сотня читань. */
+let coverObserver = null;
+function loadCovers() {
+  coverObserver?.disconnect();
+  coverObserver = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        const el = e.target;
+        coverObserver.unobserve(el);
+        const p = el.dataset.cover;
+        window.api
+          .libCover(p)
+          .then((uri) => {
+            if (uri) el.src = uri;
+          })
+          .catch(() => {});
+      }
+    },
+    { root: mainEl, rootMargin: "200px" },
+  );
+  for (const el of mainEl.querySelectorAll("[data-cover]")) coverObserver.observe(el);
+}
+
+async function loadLibrary(force = false) {
+  const L = state.library;
+  if (L.loading) return;
+  if (L.loaded && !force) return;
+  L.loading = true;
+  if (state.page === "library") render();
+
+  try {
+    const r = await window.api.libScan(state.settings.outDir);
+    L.dir = r.dir;
+    L.tracks = r.tracks;
+    L.missing = r.missing;
+    L.loaded = true;
+    state.owned = new Set(r.tracks.map((t) => ownKey(t.artist, t.title)));
+  } catch (e) {
+    L.tracks = [];
+    L.missing = true;
+    L.error = e.message;
+  } finally {
+    L.loading = false;
+    if (state.page === "library") render();
+  }
+}
+
+// ------------------------------------------------------------------ сторінка «Налаштування»
+
+function renderSettings() {
+  $("#tabs").hidden = true;
+  const s = state.settings;
+  mainEl.innerHTML = `
+    <div class="settings">
+      <h1 class="page">Налаштування</h1>
+
+      <div class="set">
+        <h4>Куди зберігати</h4>
+        <p>Сюди складається все завантажене; звідси ж читається Сховище.</p>
+        <div class="ctl">
+          <button class="ghost" id="folderBtn" title="${esc(s.outDir)}">📁 <span id="folderName">${esc(s.outDir)}</span></button>
+        </div>
+      </div>
+
+      <div class="set">
+        <h4>Формат файлу</h4>
+        <p>
+          Джерела віддають стиснутий звук — lossless там немає, тому й FLAC у списку немає:
+          він зробив би файл утричі більшим без жодного виграшу в якості.
+          <b>M4A</b> — це рідний потік без перекодування, найкраща якість.
+          <b>MP3</b> — ще одне стиснення поверх стиснутого, але його розуміє будь-яка магнітола.
+        </p>
+        <div class="ctl">
+          <select id="format">
+            <option value="m4a"${s.format === "m4a" ? " selected" : ""}>M4A — як є, без перекодування</option>
+            <option value="mp3"${s.format === "mp3" ? " selected" : ""}>MP3 320 — для старих плеєрів</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="set">
+        <h4>Стежити за буфером обміну</h4>
+        <p>Коли скопіюєш посилання на музику, програма запропонує його завантажити.</p>
+        <div class="ctl">
+          <label class="switch">
+            <input type="checkbox" id="clipToggle" ${s.watchClipboard ? "checked" : ""} />
+            Пропонувати завантаження скопійованих посилань
+          </label>
+        </div>
+      </div>
+
+      <div class="set">
+        <h4>Звідки качається звук</h4>
+        <p>
+          YouTube Music, YouTube, SoundCloud. Посилання зі <b>Spotify</b> та <b>Apple Music</b>
+          теж приймаються, але звідти качати неможливо — там потік захищений DRM. З таких
+          посилань беруться лише назви, а сам звук шукається в YouTube Music.
+          <b>Bandcamp</b> закритий захистом від автоматів, тому пошуку по ньому немає.
+        </p>
+      </div>
+
+      <div class="set">
+        <h4>Авторські права</h4>
+        <p>
+          Завантажуй лише те, на що маєш право: власні записи, музику під вільною ліцензією
+          (наприклад Creative Commons) або суспільне надбання. Відповідальність за дотримання
+          авторських прав несе користувач програми.
+        </p>
+      </div>
+
+      <div class="set" id="binSet"></div>
+    </div>`;
+
+  window.api.binaries().then((b) => {
+    const el = $("#binSet");
+    if (!el) return;
+    el.innerHTML = `
+      <h4>Зовнішні програми</h4>
+      <p>Без них можливий лише пошук, завантаження не працюватиме.</p>
+      <div class="ctl">
+        <span>yt-dlp: ${b.ytdlp ? `<code>${esc(b.ytdlp.version || b.ytdlp.path)}</code>` : "<b>не знайдено</b>"}</span>
+        <span>ffmpeg: ${b.ffmpeg ? `<code>${esc(b.ffmpeg)}</code>` : "<b>не знайдено</b>"}</span>
+      </div>`;
+  });
+}
+
+// ------------------------------------------------------------------ малювання
+
 function render() {
-  const v = state.view;
-  if (v.type === "results") renderResults();
-  else if (v.type === "album") renderAlbum(v.data);
-  else if (v.type === "artist") renderArtist(v.data);
-  else if (v.type === "catalogArtist") renderCatalogArtist(v.artist, v.releases);
+  $("#topbar").hidden = state.page !== "search";
+  $$(".navbtn").forEach((b) => b.classList.toggle("active", b.dataset.page === state.page));
+
+  if (state.page === "queue") renderQueue();
+  else if (state.page === "library") renderLibrary();
+  else if (state.page === "settings") renderSettings();
+  else {
+    const v = state.view;
+    if (v.type === "results") renderResults();
+    else if (v.type === "album") renderAlbum(v.data);
+    else if (v.type === "artist") renderArtist(v.data);
+    else if (v.type === "catalogArtist") renderCatalogArtist(v.artist, v.releases);
+    else {
+      $("#tabs").hidden = true;
+      mainEl.innerHTML = `
+        <div class="empty">
+          <div class="empty-ico">♫</div>
+          <h2>Знайди музику</h2>
+          <p>Введи назву пісні, альбому чи виконавця — пошук іде одразу по YouTube&nbsp;Music,
+             SoundCloud, iTunes і MusicBrainz. Посилання теж працює.</p>
+        </div>`;
+    }
+  }
   refreshSelbar();
+}
+
+function goto(page) {
+  state.page = page;
+  if (page === "library") loadLibrary();
+  render();
+  if (page === "search") $("#q").focus();
 }
 
 function refreshSelbar() {
   const n = state.picked.size;
-  $("#selbar").hidden = n === 0;
+  $("#selbar").hidden = n === 0 || state.page !== "search";
   $("#selCount").textContent = `${n} вибрано`;
 }
 
-// ------------------------------------------------------------------ дії
+// ------------------------------------------------------------------ пошук
 
 function searchBusy(on) {
   $("#go").disabled = on;
-  $("#go").textContent = on ? "Шукаю…" : "Пошук";
+  $("#go").textContent = on ? "Шукаю…" : "Шукати";
   $("#stop").hidden = !on;
 }
 
@@ -241,26 +583,36 @@ async function doSearch(e) {
   const q = $("#q").value.trim();
   if (!q || state.searchId) return;
 
-  const sources = [...document.querySelectorAll("#sources input:checked")].map((i) => i.value);
+  const sources = $$("#sources input:checked").map((i) => i.value);
   if (!sources.length) return fail("Не обрано жодного джерела.");
 
   const id = `s${Date.now()}`;
   state.searchId = id;
+  state.page = "search";
   searchBusy(true);
   state.picked.clear();
   refreshSelbar();
-  loading("Шукаю по всіх джерелах…");
+  $$(".navbtn").forEach((b) => b.classList.toggle("active", b.dataset.page === "search"));
+  $("#topbar").hidden = false;
+  loading(/^https?:/i.test(q) ? "Читаю посилання…" : "Шукаю по всіх джерелах…");
 
   try {
     const r = await window.api.search(q, sources, id);
     // Поки чекали, користувач міг натиснути «Стоп» і почати новий пошук —
     // тоді цей результат уже нікому не потрібен і малювати його не можна.
     if (state.searchId !== id) return;
-    state.results = { songs: r.songs || [], albums: r.albums || [], artists: r.artists || [] };
 
-    // Посилання дає лише треки — одразу відкриваємо потрібну вкладку,
-    // інакше користувач бачить порожні «Альбоми» і думає, що нічого не знайшлось.
-    if (r.mode === "url" || !state.results[state.tab].length) {
+    state.results = { songs: r.songs || [], albums: r.albums || [], artists: r.artists || [] };
+    state.results.note = null;
+
+    if (r.mode === "bridge") {
+      const miss = r.missing ? `, ${r.missing} не знайшлося` : "";
+      state.results.note =
+        `«${r.title}» зі ${r.bridge.providerName}: звідти качати неможливо (захищений потік), ` +
+        `тому звук шукався в YouTube Music${miss}.`;
+    }
+
+    if (r.mode !== "search" || !state.results[state.tab].length) {
       state.tab = ["songs", "albums", "artists"].find((t) => state.results[t].length) || "songs";
     }
     state.view = { type: "results" };
@@ -293,6 +645,7 @@ function stopSearch() {
 }
 
 async function openAlbum(item) {
+  if (!item) return;
   loading("Відкриваю альбом…");
   try {
     let album;
@@ -327,8 +680,8 @@ async function openArtistById(id) {
 }
 
 async function openArtist(item) {
+  if (!item) return;
   if (item.source === "ytmusic") return openArtistById(item.id);
-
   loading("Читаю дискографію…");
   try {
     const releases = await window.api.mbReleases(item.id);
@@ -339,17 +692,20 @@ async function openArtist(item) {
   }
 }
 
+// ------------------------------------------------------------------ завантаження
+
 async function enqueue(items) {
   const good = items.filter((i) => i && i.url);
   if (!good.length) {
-    alert("У цих результатів немає прямого джерела звуку — відкрий їх і завантаж через YouTube Music.");
+    toast("У цих результатів немає прямого джерела звуку — відкрий їх і завантаж через YouTube Music.");
     return;
   }
   try {
-    await window.api.dlAdd(good, { outDir: state.settings.outDir, format: $("#format").value });
-    $("#queue").classList.remove("collapsed");
+    await window.api.dlAdd(good, { outDir: state.settings.outDir, format: state.settings.format });
+    toast(`Додано в чергу: ${plural(good.length, TRACKS)}`,
+      [{ label: "Показати чергу", run: () => goto("queue"), primary: true }], 4000);
   } catch (err) {
-    alert("Не вдалося поставити в чергу: " + err.message);
+    toast("Не вдалося поставити в чергу: " + err.message);
   }
 }
 
@@ -358,77 +714,85 @@ function togglePick(key, on) {
   if (!it) return;
   if (on) state.picked.set(key, it);
   else state.picked.delete(key);
-  document.querySelector(`.row[data-key="${CSS.escape(key)}"]`)?.classList.toggle("sel", on);
+  mainEl.querySelector(`.row[data-key="${CSS.escape(key)}"]`)?.classList.toggle("sel", on);
   refreshSelbar();
 }
 
-// ------------------------------------------------------------------ черга
-
-function jobRow(j) {
-  const pct = Math.round(j.percent || 0);
-  let barCls = "";
-  let note = "";
-
-  if (j.status === "done") {
-    barCls = "done";
-    note = `<small class="ok">Готово · ${j.files.length} файл(ів)</small>`;
-  } else if (j.status === "error") {
-    barCls = "err";
-    note = `<small class="err">${esc(j.error || "помилка")}</small>`;
-  } else if (j.status === "canceled") {
-    note = `<small>Скасовано</small>`;
-  } else if (j.status === "retrying") {
-    barCls = "err";
-    note = `<small class="warn">${esc(j.error || "збій")} — чекаю і пробую ще раз…</small>`;
-  } else if (j.status === "queued") {
-    note = `<small>У черзі…</small>`;
-  } else {
-    const parts = [];
-    if (j.total > 1) parts.push(`трек ${j.index || 1} з ${j.total}`);
-    if (j.phase === "process") parts.push("обробка (обкладинка, теги)");
-    else if (j.speed) parts.push(size(j.speed));
-    note = `<small>${esc(parts.join(" · ") || "починаю…")}</small>`;
-  }
-
-  const acts = [];
-  if (["active", "queued", "retrying"].includes(j.status))
-    acts.push(`<button data-jact="cancel" data-id="${j.id}">Стоп</button>`);
-  if (j.status === "error" || j.status === "canceled")
-    acts.push(`<button data-jact="retry" data-id="${j.id}">Ще раз</button>`);
-  if (j.status === "done" && j.files[0])
-    acts.push(`<button data-jact="reveal" data-id="${j.id}">Показати</button>`);
-
-  return `
-    <div class="job" data-id="${j.id}">
-      ${img(j.thumb, "art")}
-      <div class="jn"><b>${esc(j.title)}</b>${note}</div>
-      <div class="bar ${barCls}"><i data-w="${j.status === "queued" ? 0 : pct}"></i></div>
-      <div class="jact">${acts.join("")}</div>
-    </div>`;
+function clearPicks() {
+  state.picked.clear();
+  mainEl.querySelectorAll('.row input[data-act="pick"]').forEach((cb) => (cb.checked = false));
+  mainEl.querySelectorAll(".row.sel").forEach((r) => r.classList.remove("sel"));
+  refreshSelbar();
 }
 
-function renderJobs() {
-  const list = [...state.jobs.values()];
-  $("#qBody").innerHTML = list.length
-    ? list.map(jobRow).join("")
-    : `<div class="note">Черга порожня.</div>`;
+// ------------------------------------------------------------------ плеєр
 
-  // Ширину смужки задаємо через CSSOM, а не атрибутом style у розмітці:
-  // атрибут блокує наша ж політика безпеки (style-src 'self'), і смужка
-  // назавжди лишається на нулі, хоча файл при цьому качається нормально.
-  for (const bar of $("#qBody").querySelectorAll(".bar > i")) {
-    bar.style.width = bar.dataset.w + "%";
+function play(track) {
+  const same = state.playing?.path === track.path;
+  if (same && !audio.paused) {
+    audio.pause();
+    return;
   }
-  const busy = list.filter((j) => ["active", "queued", "retrying"].includes(j.status)).length;
-  $("#qBadge").textContent = busy || list.length;
+  if (!same) {
+    state.playing = track;
+    audio.src = fileUrl(track.path);
+    $("#plTitle").textContent = track.title;
+    $("#plArtist").textContent = track.artist || "невідомий виконавець";
+    $("#plArt").src = BLANK;
+    window.api.libCover(track.path).then((u) => {
+      if (u && state.playing?.path === track.path) $("#plArt").src = u;
+    });
+    $("#player").classList.remove("idle");
+    $("#plPlay").disabled = false;
+    $("#plSeek").disabled = false;
+  }
+  audio.play().catch((e) => toast("Не вдалося відтворити: " + e.message));
 }
+
+function syncPlayBtn() {
+  $("#plPlay").textContent = audio.paused ? "▶" : "❚❚";
+  if (state.page === "library") {
+    mainEl.querySelectorAll(".row[data-path]").forEach((r) => {
+      const on = r.dataset.path === state.playing?.path;
+      r.classList.toggle("playing", on);
+      const b = r.querySelector('[data-lact="play"]');
+      if (b) b.textContent = on && !audio.paused ? "❚❚" : "▶";
+    });
+  }
+}
+
+audio.addEventListener("play", syncPlayBtn);
+audio.addEventListener("pause", syncPlayBtn);
+audio.addEventListener("ended", syncPlayBtn);
+audio.addEventListener("loadedmetadata", () => {
+  $("#plEnd").textContent = dur(audio.duration);
+});
+audio.addEventListener("timeupdate", () => {
+  $("#plNow").textContent = dur(audio.currentTime);
+  if (audio.duration) $("#plSeek").value = String((audio.currentTime / audio.duration) * 1000);
+});
+audio.addEventListener("error", () => {
+  if (audio.src) toast("Файл не відтворюється — можливо, його видалили або формат не підтримується.");
+});
+
+$("#plPlay").addEventListener("click", () => (audio.paused ? audio.play() : audio.pause()));
+$("#plSeek").addEventListener("input", () => {
+  if (audio.duration) audio.currentTime = (Number($("#plSeek").value) / 1000) * audio.duration;
+});
+$("#plVol").addEventListener("input", () => {
+  audio.volume = Number($("#plVol").value) / 100;
+  state.settings.volume = audio.volume;
+  window.api.setSettings({ volume: audio.volume }).catch(() => {});
+});
 
 // ------------------------------------------------------------------ події
 
 $("#searchForm").addEventListener("submit", doSearch);
 $("#stop").addEventListener("click", stopSearch);
 
-document.querySelectorAll(".tab").forEach((t) =>
+$$(".navbtn").forEach((b) => b.addEventListener("click", () => goto(b.dataset.page)));
+
+$$(".tab").forEach((t) =>
   t.addEventListener("click", () => {
     state.tab = t.dataset.tab;
     state.view = { type: "results" };
@@ -437,39 +801,96 @@ document.querySelectorAll(".tab").forEach((t) =>
 );
 
 mainEl.addEventListener("click", (e) => {
+  // --- кнопки з data-act (Шукач) ---
   const btn = e.target.closest("[data-act]");
-  if (!btn) return;
-  const act = btn.dataset.act;
-  const rowKey = btn.closest("[data-key]")?.dataset.key;
-
-  if (act === "pick") return togglePick(rowKey, btn.checked);
-  if (act === "dl-one") return enqueue([index.get(rowKey)]);
-  if (act === "dl-album") return enqueue([index.get(btn.dataset.key)]);
-  if (act === "open-album") return openAlbum(index.get(btn.dataset.key));
-  if (act === "open-artist") return openArtist(index.get(btn.dataset.key));
-  if (act === "open-artist-id") return openArtistById(btn.dataset.id);
-  if (act === "back") {
-    state.view = { type: "results" };
-    return render();
+  if (btn) {
+    const act = btn.dataset.act;
+    const rowKey = btn.closest("[data-key]")?.dataset.key;
+    if (act === "pick") return togglePick(rowKey, btn.checked);
+    if (act === "dl-one") return enqueue([index.get(rowKey)]);
+    if (act === "dl-album") return enqueue([index.get(btn.dataset.key)]);
+    if (act === "open-album") return openAlbum(index.get(btn.dataset.key));
+    if (act === "open-artist") return openArtist(index.get(btn.dataset.key));
+    if (act === "open-artist-id") return openArtistById(btn.dataset.id);
+    if (act === "back") {
+      state.view = { type: "results" };
+      return render();
+    }
+    if (act === "pick-all") {
+      mainEl.querySelectorAll('.row input[data-act="pick"]:not(:disabled)').forEach((cb) => {
+        if (!cb.checked) {
+          cb.checked = true;
+          togglePick(cb.closest(".row").dataset.key, true);
+        }
+      });
+      return;
+    }
   }
-  if (act === "pick-all") {
-    mainEl.querySelectorAll('.row input[data-act="pick"]').forEach((cb) => {
-      if (!cb.checked) {
-        cb.checked = true;
-        togglePick(cb.closest(".row").dataset.key, true);
-      }
+
+  // --- кнопки Сховища ---
+  const lb = e.target.closest("[data-lact]");
+  if (lb) {
+    const p = lb.closest("[data-path]")?.dataset.path;
+    const track = state.library.tracks.find((t) => t.path === p);
+    if (!track) return;
+    if (lb.dataset.lact === "play") return play(track);
+    if (lb.dataset.lact === "reveal") return window.api.reveal(p);
+    if (lb.dataset.lact === "trash") {
+      if (!confirm(`Перемістити «${track.title}» у кошик?`)) return;
+      return window.api
+        .libTrash(p)
+        .then(() => {
+          state.library.tracks = state.library.tracks.filter((t) => t.path !== p);
+          render();
+        })
+        .catch((err) => toast("Не вдалося: " + err.message));
+    }
+  }
+
+  // --- черга ---
+  const jb = e.target.closest("[data-jact]");
+  if (jb) {
+    const job = state.jobs.get(jb.dataset.id);
+    if (jb.dataset.jact === "cancel") return window.api.dlCancel(jb.dataset.id);
+    if (jb.dataset.jact === "retry") return window.api.dlRetry(jb.dataset.id);
+    if (jb.dataset.jact === "reveal" && job?.files[0]) return window.api.reveal(job.files[0]);
+  }
+
+  if (e.target.id === "qOpen" || e.target.id === "libOpen")
+    return window.api.openFolder(state.settings.outDir);
+  if (e.target.id === "qClear")
+    return window.api.dlClear().then((left) => {
+      state.jobs = new Map(left.map((j) => [j.id, j]));
+      refreshQueueBadge();
+      render();
     });
-  }
-});
+  if (e.target.id === "libRescan") return loadLibrary(true);
+  if (e.target.id === "folderBtn" || e.target.closest("#folderBtn")) return chooseFolder();
 
-// Клік по рядку (а не по кнопці) теж перемикає галочку — так швидше вибирати.
-mainEl.addEventListener("click", (e) => {
-  if (e.target.closest("[data-act]")) return;
+  // --- клік по рядку треку вмикає галочку, по рядку Сховища — програвання ---
+  if (btn || lb || jb) return;
   const row = e.target.closest(".row");
   if (!row) return;
+  if (row.dataset.path) {
+    const track = state.library.tracks.find((t) => t.path === row.dataset.path);
+    if (track) play(track);
+    return;
+  }
   const cb = row.querySelector('input[data-act="pick"]');
+  if (!cb || cb.disabled) return;
   cb.checked = !cb.checked;
   togglePick(row.dataset.key, cb.checked);
+});
+
+mainEl.addEventListener("change", (e) => {
+  if (e.target.id === "format") {
+    state.settings.format = e.target.value;
+    window.api.setSettings({ format: e.target.value });
+  }
+  if (e.target.id === "clipToggle") {
+    state.settings.watchClipboard = e.target.checked;
+    window.api.setSettings({ watchClipboard: e.target.checked });
+  }
 });
 
 // Обкладинка з каталогу часто 404 — CSP забороняє inline onerror, тому ловимо тут.
@@ -481,66 +902,66 @@ mainEl.addEventListener(
   true,
 );
 
-$("#selNone").addEventListener("click", () => {
-  state.picked.clear();
-  document.querySelectorAll('.row input[data-act="pick"]').forEach((cb) => (cb.checked = false));
-  document.querySelectorAll(".row.sel").forEach((r) => r.classList.remove("sel"));
-  refreshSelbar();
-});
-
+$("#selNone").addEventListener("click", clearPicks);
 $("#selDl").addEventListener("click", () => {
   const items = [...state.picked.values()];
-  state.picked.clear();
-  document.querySelectorAll('.row input[data-act="pick"]').forEach((cb) => (cb.checked = false));
-  document.querySelectorAll(".row.sel").forEach((r) => r.classList.remove("sel"));
-  refreshSelbar();
+  clearPicks();
   enqueue(items);
 });
 
-$("#queueHead").addEventListener("click", (e) => {
-  if (e.target.closest("button") && e.target.id !== "qToggle") return;
-  $("#queue").classList.toggle("collapsed");
-});
+$("#toastClose").addEventListener("click", hideToast);
 
-$("#qClear").addEventListener("click", async () => {
-  const left = await window.api.dlClear();
-  state.jobs = new Map(left.map((j) => [j.id, j]));
-  renderJobs();
-});
-
-$("#qOpen").addEventListener("click", () => window.api.openFolder(state.settings.outDir));
-
-$("#qBody").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-jact]");
-  if (!b) return;
-  const job = state.jobs.get(b.dataset.id);
-  if (b.dataset.jact === "cancel") window.api.dlCancel(b.dataset.id);
-  if (b.dataset.jact === "retry") window.api.dlRetry(b.dataset.id);
-  if (b.dataset.jact === "reveal" && job?.files[0]) window.api.reveal(job.files[0]);
-});
-
-$("#folderBtn").addEventListener("click", async () => {
+async function chooseFolder() {
   const dir = await window.api.chooseFolder();
-  if (dir) {
-    state.settings.outDir = dir;
-    $("#folderName").textContent = dir.split(/[\\/]/).pop();
-    $("#folderBtn").title = dir;
-  }
-});
+  if (!dir) return;
+  state.settings.outDir = dir;
+  state.library.loaded = false;
+  if (state.page === "settings") render();
+  loadLibrary(true);
+}
 
-$("#format").addEventListener("change", () => window.api.setSettings({ format: $("#format").value }));
-
-document.querySelectorAll("#sources input").forEach((cb) =>
+$$("#sources input").forEach((cb) =>
   cb.addEventListener("change", () =>
-    window.api.setSettings({
-      sources: [...document.querySelectorAll("#sources input:checked")].map((i) => i.value),
-    }),
+    window.api.setSettings({ sources: $$("#sources input:checked").map((i) => i.value) }),
   ),
 );
 
 window.api.onDlUpdate((job) => {
+  const was = state.jobs.get(job.id);
   state.jobs.set(job.id, job);
-  renderJobs();
+  refreshQueueBadge();
+
+  if (state.page === "queue") {
+    // Перемальовуємо весь список лише коли змінився склад: інакше кожне
+    // оновлення прогресу гасило б натискання на кнопки в черзі.
+    if (!was) render();
+    else {
+      const el = mainEl.querySelector(`.job[data-id="${job.id}"]`);
+      if (el) {
+        el.outerHTML = jobRow(job);
+        applyBars();
+      } else render();
+    }
+  }
+
+  // Завантажене одразу має з'явитись у Сховищі й позначитись у пошуку.
+  if (job.status === "done" && was?.status !== "done") loadLibrary(true);
+});
+
+window.api.onClipboardLink((url) => {
+  if (!state.settings.watchClipboard) return;
+  toast("О, бачу лінк. Качаємо?", [
+    {
+      label: "Так",
+      primary: true,
+      run: () => {
+        $("#q").value = url;
+        goto("search");
+        doSearch();
+      },
+    },
+    { label: "Ні", run: hideToast },
+  ]);
 });
 
 // ------------------------------------------------------------------ старт
@@ -548,12 +969,9 @@ window.api.onDlUpdate((job) => {
 (async function init() {
   const s = await window.api.getSettings();
   state.settings = s;
-  $("#format").value = s.format;
-  $("#folderName").textContent = s.outDir.split(/[\\/]/).pop() || s.outDir;
-  $("#folderBtn").title = s.outDir;
-  document.querySelectorAll("#sources input").forEach((cb) => {
-    cb.checked = s.sources.includes(cb.value);
-  });
+  $$("#sources input").forEach((cb) => (cb.checked = s.sources.includes(cb.value)));
+  audio.volume = s.volume ?? 0.8;
+  $("#plVol").value = String(Math.round(audio.volume * 100));
 
   const b = await window.api.binaries();
   if (!b.ok) {
@@ -563,11 +981,15 @@ window.api.onDlUpdate((job) => {
     const w = $("#warn");
     w.hidden = false;
     w.textContent =
-      `Не знайдено: ${miss.join(", ")}. Пошук у YouTube Music, iTunes і MusicBrainz працюватиме, ` +
-      `а завантаження — ні. Поклади ${miss.join(" і ")} у теку bin поруч із програмою.`;
+      `Не знайдено: ${miss.join(", ")}. Пошук працюватиме, а завантаження — ні. ` +
+      `Поклади ${miss.join(" і ")} у теку bin поруч із програмою.`;
   }
 
   state.jobs = new Map((await window.api.dlList()).map((j) => [j.id, j]));
-  renderJobs();
+  refreshQueueBadge();
+  render();
   $("#q").focus();
+
+  // Сховище читаємо у фоні: воно потрібне ще й для позначки «вже є» в пошуку.
+  loadLibrary();
 })();

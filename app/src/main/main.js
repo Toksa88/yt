@@ -1,12 +1,13 @@
 "use strict";
 
 const path = require("path");
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, clipboard } = require("electron");
 
 const binaries = require("./binaries");
 const search = require("./search");
 const downloads = require("./download");
 const settings = require("./settings");
+const library = require("./library");
 
 let win = null;
 
@@ -104,6 +105,21 @@ handle("search:query", async (query, sources, searchId) => {
   if (!q) throw new Error("Порожній запит");
 
   if (search.looksLikeUrl(q)) {
+    // Spotify та Apple Music віддають захищений потік — yt-dlp там безсилий.
+    // Тому не вдаємо, ніби качаємо звідти: беремо назви й шукаємо в YT Music.
+    if (search.bridgeProvider(q)) {
+      const r = await search.resolveBridge(q, searchId);
+      return {
+        mode: "bridge",
+        title: r.meta.name,
+        bridge: { ...r.meta, items: undefined },
+        missing: r.missing,
+        songs: r.songs,
+        albums: [],
+        artists: [],
+        errors: [],
+      };
+    }
     const res = await search.resolveUrl(q, searchId);
     return { mode: "url", title: res.title, songs: res.songs, albums: [], artists: [], errors: [] };
   }
@@ -143,6 +159,16 @@ handle("dialog:folder", async () => {
   return settings.save({ outDir: r.filePaths[0] }).outDir;
 });
 
+handle("lib:scan", (dir) => library.scan(dir || settings.load().outDir));
+handle("lib:cover", (file) => library.cover(file));
+
+// Саме в кошик, а не назавжди: помилковий клік не має нищити музику.
+handle("lib:trash", async (file) => {
+  await shell.trashItem(file);
+  library.forget(file);
+  return true;
+});
+
 handle("shell:reveal", (file) => {
   if (file) shell.showItemInFolder(file);
   return true;
@@ -156,6 +182,39 @@ handle("shell:external", (url) => {
 downloads.bus.on("update", (job) => {
   if (win && !win.isDestroyed()) win.webContents.send("dl:update", job);
 });
+
+// ------------------------------------------------------------------ буфер обміну
+
+const MUSIC_LINK =
+  /^https?:\/\/(?:[\w-]+\.)*(youtube\.com|youtu\.be|soundcloud\.com|spotify\.com|bandcamp\.com|music\.apple\.com)\/\S+$/i;
+
+/**
+ * Стежить за буфером обміну і пропонує завантажити скопійоване посилання.
+ * Те, що лежало в буфері ДО запуску, навмисно пропускаємо: інакше програма
+ * вітає користувача підказкою про лінк, який він копіював годину тому.
+ */
+function watchClipboard() {
+  let last = "";
+  try {
+    last = clipboard.readText() || "";
+  } catch {
+    /* буфер може бути зайнятий іншою програмою */
+  }
+
+  setInterval(() => {
+    let text = "";
+    try {
+      text = (clipboard.readText() || "").trim();
+    } catch {
+      return;
+    }
+    if (text === last) return;
+    last = text;
+    if (!settings.load().watchClipboard) return;
+    if (text.length > 500 || !MUSIC_LINK.test(text)) return;
+    if (win && !win.isDestroyed()) win.webContents.send("clipboard:link", text);
+  }, 1200);
+}
 
 // ------------------------------------------------------------------ старт
 
@@ -172,6 +231,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     buildMenu();
     createWindow();
+    watchClipboard();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });

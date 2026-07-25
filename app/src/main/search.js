@@ -15,6 +15,7 @@
 
 const { spawn } = require("child_process");
 const binaries = require("./binaries");
+const bridge = require("./bridge");
 
 const UA_MB = "MusicGrabber/1.0 ( https://github.com/local/music-grabber )";
 const NET_TIMEOUT = 15000;
@@ -341,6 +342,88 @@ async function resolveUrl(url, searchId) {
   return { title: info.title || url, songs };
 }
 
+// ---------------------------------------------------------------- міст Spotify/Apple
+
+/** Виконує завдання пачками по `limit` — 50 запитів разом YouTube не любить. */
+async function inBatches(items, limit, fn) {
+  const out = [];
+  for (let i = 0; i < items.length; i += limit) {
+    out.push(...(await Promise.all(items.slice(i, i + limit).map(fn))));
+  }
+  return out;
+}
+
+const normTitle = (s) =>
+  String(s || "")
+    .toLowerCase()
+    .replace(/\((feat|ft)\.?[^)]*\)/g, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+
+/**
+ * Бере посилання зі Spotify/Apple Music і повертає ті самі треки, але знайдені
+ * в YouTube Music. Те, чого там немає, повертаємо з позначкою — мовчки
+ * викидати треки зі списку не можна, інакше «альбом на 12 пісень» тихо
+ * перетворюється на 9 і ніхто не розуміє чому.
+ */
+async function resolveBridge(url, searchId) {
+  begin(searchId);
+  try {
+    const meta = await bridge.resolve(url);
+    if (!meta) throw new Error("Це посилання не з підтримуваного сервісу");
+
+    const y = await ytm();
+    const songs = await inBatches(meta.items, 5, async (it) => {
+      const slot = running.get(searchId);
+      if (searchId && (!slot || slot.stopped)) return null;
+
+      let found = [];
+      try {
+        found = await y.searchSongs(`${it.artist} ${it.title}`.trim());
+      } catch {
+        /* один невдалий запит не має валити весь список */
+      }
+      const want = normTitle(it.title);
+      const hit =
+        found.find((s) => normTitle(s.name) === want) ||
+        found.find((s) => normTitle(s.name).includes(want) || want.includes(normTitle(s.name))) ||
+        found[0];
+
+      if (!hit) {
+        return {
+          kind: "song",
+          source: "bridge",
+          id: `miss:${it.artist}:${it.title}`,
+          url: null,
+          title: it.title,
+          artist: it.artist,
+          album: "",
+          duration: null,
+          thumb: null,
+          missing: true,
+        };
+      }
+      return { ...ytSong(hit), bridgedFrom: meta.providerName };
+    });
+
+    const slot = running.get(searchId);
+    if (searchId && (!slot || slot.stopped)) {
+      const err = new Error("Зупинено");
+      err.stopped = true;
+      throw err;
+    }
+
+    const list = songs.filter(Boolean);
+    return {
+      meta,
+      songs: list,
+      missing: list.filter((s) => s.missing).length,
+    };
+  } finally {
+    finish(searchId);
+  }
+}
+
 // ---------------------------------------------------------------- головне
 
 /**
@@ -466,6 +549,8 @@ async function resolveCatalogItem(item) {
 module.exports = {
   cancel,
   searchAll,
+  resolveBridge,
+  bridgeProvider: bridge.provider,
   getAlbum,
   getArtist,
   resolveCatalogItem,

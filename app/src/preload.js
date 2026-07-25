@@ -30,6 +30,12 @@ contextBridge.exposeInMainWorld("api", {
   dlClear: () => call("dl:clear"),
   onDlUpdate: (cb) => ipcRenderer.on("dl:update", (_e, job) => cb(job)),
 
+  libScan: (dir) => call("lib:scan", dir),
+  libCover: (file) => call("lib:cover", file),
+  libTrash: (file) => call("lib:trash", file),
+
+  onClipboardLink: (cb) => ipcRenderer.on("clipboard:link", (_e, url) => cb(url)),
+
   getSettings: () => call("settings:get"),
   setSettings: (patch) => call("settings:set", patch),
 

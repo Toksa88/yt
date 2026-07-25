@@ -8,8 +8,13 @@ const FILE = () => path.join(app.getPath("userData"), "settings.json");
 
 const DEFAULTS = {
   outDir: "",
-  format: "mp3",
+  // «Як є»: m4a — це рідний формат YouTube, ffmpeg лише перекладає контейнер
+  // без перекодування. MP3 доступний у налаштуваннях для старих плеєрів
+  // і магнітол, але він завжди означає ще одне стиснення поверх стиснутого.
+  format: "m4a",
   sources: ["ytmusic", "soundcloud", "itunes", "musicbrainz"],
+  watchClipboard: true,
+  volume: 0.8,
 };
 
 let cache = null;

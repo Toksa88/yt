@@ -1,20 +1,22 @@
 /**
  * Наскрізна перевірка інтерфейсу: піднімає справжнє вікно додатка, під'єднується
- * до нього по DevTools-протоколу і робить те саме, що робив би користувач —
- * друкує запит, тисне «Пошук», перемикає вкладки, відкриває альбом.
+ * до нього по DevTools-протоколу і робить те саме, що робив би користувач.
  *
  *   npm run test:ui
  *
  * Змінна MG_SHOTS=<тека> вмикає знімки вікна: частину помилок (розтягнута
- * мітка, мертва смужка) видно тільки оком, перевіркою DOM їх не спіймати.
+ * мітка, мертва смужка прогресу) видно тільки оком, перевіркою DOM їх не спіймати.
  */
 "use strict";
 const { spawn } = require("child_process");
+const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const PORT = 9333;
 const APP = path.join(__dirname, "..");
 const ELECTRON = path.join(APP, "node_modules", "electron", "dist", "electron.exe");
+const OUT = path.join(os.tmpdir(), "mg-ui-test");
 
 let failures = 0;
 const check = (name, ok, extra = "") => {
@@ -68,31 +70,30 @@ function connect(url) {
 }
 
 (async () => {
+  fs.rmSync(OUT, { recursive: true, force: true });
+
   const child = spawn(ELECTRON, [APP, `--remote-debugging-port=${PORT}`], {
     cwd: APP,
     env: { ...process.env, MG_DEBUG: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout.on("data", (d) => process.stdout.write("  [main] " + d));
-  child.stderr.on("data", (d) => {
-    const s = String(d);
-    if (/Error|error/.test(s)) process.stdout.write("  [main/err] " + s);
-  });
 
   const page = await findPage();
   const cdp = await connect(page.webSocketDebuggerUrl);
   await cdp.send("Runtime.enable");
+  await cdp.send("Page.enable").catch(() => {});
+  await cdp.send("Log.enable").catch(() => {});
 
   const errors = [];
-  // Будь-яка помилка в інтерфейсі має провалити тест, а не лишитись непоміченою.
-  // Сюди ж потрапляють порушення CSP: вони не кидають винятку, тож інакше
+  // Сюди потрапляють і порушення CSP: вони не кидають винятку, тож інакше
   // мертва смужка прогресу так і лишилась би «успішним» тестом.
-  await cdp.send("Log.enable").catch(() => {});
   cdp.on((msg) => {
     if (msg.method !== "Log.entryAdded") return;
     const e = msg.params.entry;
     if (e.level === "error") errors.push(`${e.source}: ${e.text}`.slice(0, 160));
   });
+
   const evalJs = async (expr) => {
     const r = await cdp.send("Runtime.evaluate", {
       expression: `(async () => { ${expr} })()`,
@@ -111,17 +112,22 @@ function connect(url) {
   const shot = async (name) => {
     if (!SHOTS) return;
     const r = await cdp.send("Page.captureScreenshot", { format: "png" });
-    const file = path.join(SHOTS, `${String(++shotNo).padStart(2, "0")}-${name}.png`);
-    require("fs").writeFileSync(file, Buffer.from(r.data, "base64"));
-    console.log("  знімок: " + file);
+    fs.writeFileSync(path.join(SHOTS, `${String(++shotNo).padStart(2, "0")}-${name}.png`), Buffer.from(r.data, "base64"));
+  };
+
+  /** Чекає, доки вираз поверне щось не-null. */
+  const until = async (expr, tries = 40, ms = 700) => {
+    for (let i = 0; i < tries; i++) {
+      await sleep(ms);
+      const v = await evalJs(expr);
+      if (v) return v;
+    }
+    return null;
   };
 
   try {
-    await cdp.send("Page.enable").catch(() => {});
-    console.log("\n[1] Вікно завантажилось");
+    console.log("\n[1] Вікно і каркас");
     check("заголовок", (await evalJs("return document.title")) === "Music Grabber");
-    // Фон body заданий градієнтом, тобто background-IMAGE: перевіряти
-    // backgroundColor тут безглуздо — він законно прозорий.
     check("стилі застосувались", (await evalJs(`
       const b = getComputedStyle(document.body);
       const tab = getComputedStyle(document.querySelector('.tab.active'));
@@ -129,49 +135,51 @@ function connect(url) {
           && b.backgroundImage.includes('gradient')
           && tab.borderBottomColor === 'rgb(124, 92, 255)';`)) === true);
     check("місток api доступний", (await evalJs("return typeof window.api?.search")) === "function");
-    check(
-      "теку підставлено з налаштувань",
-      Boolean(await evalJs("return document.querySelector('#folderName').textContent.trim()")),
-      await evalJs("return document.querySelector('#folderBtn').title"),
-    );
-    check("попередження про бінарники не показано", (await evalJs("return document.querySelector('#warn').hidden")) === true);
+    check("ліва панель має 4 розділи", (await evalJs("return document.querySelectorAll('.navbtn').length")) === 4);
+    check("плеєр на місці й неактивний", (await evalJs(`
+      return document.querySelector('#player').classList.contains('idle')
+          && document.querySelector('#plPlay').disabled;`)) === true);
     // Регресія: `display:flex` у нашій таблиці перебивав службове [hidden],
     // і панель вибору висіла на екрані з написом «0 вибрано».
     check("hidden справді ховає", (await evalJs(`
       const el = document.querySelector('#selbar');
       return el.hidden && getComputedStyle(el).display === 'none';`)) === true);
+    check("попередження про бінарники не показано", (await evalJs("return document.querySelector('#warn').hidden")) === true);
+    check("множина українською", (await evalJs(`
+      return [1,2,5,11,21,102].map(n => plural(n, TRACKS)).join('|');`))
+      === "1 трек|2 треки|5 треків|11 треків|21 трек|102 треки");
+    // Регресія: смужки еквалайзера мали height:auto до першого кадру анімації
+    // (а затримка там до 0.45 с) — і замість еквалайзера була крапка.
+    check("смужки еквалайзера мають висоту", (await evalJs(`
+      const d = document.createElement('div');
+      d.className = 'eq';
+      d.innerHTML = '<i></i><i></i>';
+      document.body.appendChild(d);
+      const h = d.querySelector('i').getBoundingClientRect().height;
+      d.remove();
+      return h;`)) > 2);
 
     console.log("\n[2] Пошук «Black Magick SS»");
     await evalJs(`
       document.querySelector('#q').value = 'Black Magick SS';
       document.querySelector('#searchForm').dispatchEvent(new Event('submit', {cancelable:true}));
       return true;`);
-
-    let counts = null;
-    for (let i = 0; i < 60; i++) {
-      await sleep(1000);
-      counts = await evalJs(`
-        if (document.querySelector('.spinner')) return null;
-        return [...document.querySelectorAll('.tab .cnt')].map(e => Number(e.textContent));`);
-      if (counts) break;
-    }
+    const counts = await until(`
+      if (document.querySelector('.spinner')) return null;
+      const c = [...document.querySelectorAll('.tab .cnt')].map(e => Number(e.textContent));
+      return c.some(n => n > 0) ? c : null;`, 60, 1000);
     check("пошук завершився", Array.isArray(counts), counts ? `треки/альбоми/виконавці = ${counts}` : "не дочекались");
     check("знайдено треки", counts?.[0] > 0);
     check("знайдено альбоми", counts?.[1] > 0);
     check("знайдено виконавців", counts?.[2] > 0);
-    check("намальовано рядки треків", (await evalJs("return document.querySelectorAll('.row').length")) > 0);
     // Регресія: правило `.row .name span` ловило мітку джерела і робило її
     // блоком на всю ширину колонки — рядок ставав утричі вищим.
     check("мітка джерела не розтягнута", (await evalJs(`
       const b = document.querySelector('.row .badge');
-      const row = document.querySelector('.row .name');
+      const n = document.querySelector('.row .name');
       return getComputedStyle(b).display === 'inline-block'
-          && b.getBoundingClientRect().width < row.getBoundingClientRect().width / 2;`)) === true);
+          && b.getBoundingClientRect().width < n.getBoundingClientRect().width / 2;`)) === true);
     await shot("треки");
-    check(
-      "є мітки джерел",
-      (await evalJs("return [...new Set([...document.querySelectorAll('.badge')].map(b=>b.className))].join()")).includes("badge"),
-    );
 
     console.log("\n[3] Вибір треків");
     await evalJs("document.querySelectorAll('.row')[0].click(); return true");
@@ -180,111 +188,88 @@ function connect(url) {
     await evalJs("document.querySelector('#selNone').click(); return true");
     check("«зняти вибір» працює", (await evalJs("return document.querySelector('#selbar').hidden")) === true);
 
-    console.log("\n[4] Вкладка «Альбоми» і відкриття альбому");
+    console.log("\n[4] Альбоми");
     await evalJs("document.querySelector('.tab[data-tab=albums]').click(); return true");
     await sleep(300);
-    const cards = await evalJs("return document.querySelectorAll('.card').length");
-    check("картки альбомів намальовані", cards > 0, `${cards} шт.`);
+    check("картки альбомів намальовані", (await evalJs("return document.querySelectorAll('.card').length")) > 0);
     await shot("альбоми");
 
     await evalJs("document.querySelectorAll('.card')[0].click(); return true");
-    let album = null;
-    for (let i = 0; i < 30; i++) {
-      await sleep(700);
-      album = await evalJs(`
-        if (document.querySelector('.spinner')) return null;
-        const h = document.querySelector('.detail-head h1');
-        if (!h) return null;
-        return { title: h.textContent,
-                 tracks: document.querySelectorAll('.row').length,
-                 canGrab: !document.querySelector('[data-act=dl-album]')?.disabled };`);
-      if (album) break;
-    }
+    const album = await until(`
+      if (document.querySelector('.spinner')) return null;
+      const h = document.querySelector('.detail-head h1');
+      if (!h) return null;
+      return { title: h.textContent, tracks: document.querySelectorAll('.row').length,
+               canGrab: !document.querySelector('[data-act=dl-album]')?.disabled };`, 30);
     check("альбом відкрився", Boolean(album), album ? `«${album.title}»` : "не дочекались");
     check("треклист показано", album?.tracks > 0, `${album?.tracks} треків`);
-    check("кнопка «Завантажити альбом» активна", album?.canGrab === true);
-    await shot("альбом-деталі");
+    check("кнопка альбому активна", album?.canGrab === true);
+    await shot("альбом");
 
-    console.log("\n[5] Навігація назад");
+    console.log("\n[5] Виконавці");
     await evalJs("document.querySelector('[data-act=back]').click(); return true");
     await sleep(300);
-    check("повернулись до результатів", (await evalJs("return !document.querySelector('#tabs').hidden")) === true);
-
-    console.log("\n[6] Вкладка «Виконавці»");
     await evalJs("document.querySelector('.tab[data-tab=artists]').click(); return true");
     await sleep(300);
-    check("картки виконавців є", (await evalJs("return document.querySelectorAll('.card').length")) > 0);
-    await shot("виконавці");
-
-    console.log("\n[6b] Сторінка виконавця з YouTube Music");
     await evalJs(`
       const c = [...document.querySelectorAll('.card')].find(c => c.querySelector('.badge.ytmusic'));
       (c || document.querySelector('.card')).click(); return true;`);
-    let art = null;
-    for (let i = 0; i < 30; i++) {
-      await sleep(700);
-      art = await evalJs(`
-        if (document.querySelector('.spinner')) return null;
-        const h = document.querySelector('.detail-head h1');
-        if (!h) return null;
-        return { name: h.textContent,
-                 secs: [...document.querySelectorAll('h3.sec')].map(e=>e.textContent),
-                 cards: document.querySelectorAll('.card').length,
-                 rows: document.querySelectorAll('.row').length };`);
-      if (art) break;
-    }
+    const art = await until(`
+      if (document.querySelector('.spinner')) return null;
+      const h = document.querySelector('.detail-head h1');
+      if (!h) return null;
+      return { name: h.textContent, secs: [...document.querySelectorAll('h3.sec')].map(e=>e.textContent) };`, 30);
     check("виконавець відкрився", Boolean(art), art ? `«${art.name}»` : "не дочекались");
     check("є розділи дискографії", art?.secs?.length > 0, (art?.secs || []).join(", "));
     await shot("виконавець");
 
-    console.log("\n[6c] Зупинка пошуку");
+    console.log("\n[6] Зупинка пошуку");
     await evalJs(`
       document.querySelector('#q').value = 'metal';
       document.querySelector('#searchForm').dispatchEvent(new Event('submit', {cancelable:true}));
       return true;`);
     await sleep(400);
     check("кнопка «Стоп» з'явилась", (await evalJs("return !document.querySelector('#stop').hidden")) === true);
-    check("«Пошук» заблоковано", (await evalJs("return document.querySelector('#go').disabled")) === true);
-
+    check("«Шукати» заблоковано", (await evalJs("return document.querySelector('#go').disabled")) === true);
     await evalJs("document.querySelector('#stop').click(); return true");
     check("«Стоп» сховалась одразу", (await evalJs("return document.querySelector('#stop').hidden")) === true);
-    check("«Пошук» знову активний", (await evalJs("return document.querySelector('#go').disabled")) === false);
-    check("сказано, що зупинено", (await evalJs("return document.querySelector('#main').textContent")).includes("зупинено"));
-
+    check("«Шукати» знову активний", (await evalJs("return document.querySelector('#go').disabled")) === false);
     // Найважливіше: зупинений пошук не має «дострілювати» результатом пізніше
     // і затирати те, що користувач уже бачить.
     await sleep(9000);
     check("зупинений пошук не домалював результати",
       (await evalJs("return document.querySelector('#main').textContent")).includes("зупинено"));
-    check("після зупинки можна шукати знову", (await evalJs(`
-      document.querySelector('#q').value = 'Kevin MacLeod';
+
+    console.log("\n[7] Міст зі Spotify");
+    await evalJs(`
+      document.querySelector('#q').value = 'https://open.spotify.com/track/6rqhFgbbKwnb9MLmUQDhG6';
       document.querySelector('#searchForm').dispatchEvent(new Event('submit', {cancelable:true}));
-      return !!state.searchId;`)) === true);
-    await evalJs("document.querySelector('#stop').click(); return true");
+      return true;`);
+    const br = await until(`
+      if (document.querySelector('.spinner')) return null;
+      const n = document.querySelector('.note.info');
+      const r = document.querySelectorAll('.row');
+      if (!n && !r.length) return null;
+      return { note: n?.textContent || '', rows: r.length,
+               first: r[0]?.querySelector('b')?.textContent || '' };`, 45);
+    check("посилання Spotify оброблено", Boolean(br), br ? br.first : "не дочекались");
+    check("знайдено відповідник на YouTube", br?.rows > 0, `${br?.rows} рядків`);
+    check("чесно сказано про підміну джерела",
+      /Spotify/.test(br?.note || "") && /YouTube Music/.test(br?.note || ""),
+      (br?.note || "").slice(0, 90));
+    await shot("міст-spotify");
 
-    console.log("\n[7] Справжнє завантаження через чергу");
-    const fs = require("fs");
-    const os = require("os");
-    const OUT = path.join(os.tmpdir(), "mg-ui-test");
-    fs.rmSync(OUT, { recursive: true, force: true });
-
-    // Через поле пошуку — щоб перевірити і гілку «вставлене посилання».
+    console.log("\n[8] Завантаження через чергу");
     await evalJs(`
       state.settings.outDir = ${JSON.stringify(OUT)};
       document.querySelector('#q').value = 'https://www.youtube.com/watch?v=N0KuBFK9r24';
       document.querySelector('#searchForm').dispatchEvent(new Event('submit', {cancelable:true}));
       return true;`);
-
-    let byUrl = null;
-    for (let i = 0; i < 40; i++) {
-      await sleep(1000);
-      byUrl = await evalJs(`
-        if (document.querySelector('.spinner')) return null;
-        const r = document.querySelectorAll('.row');
-        return r.length ? { n: r.length, first: r[0].querySelector('b').textContent } : null;`);
-      if (byUrl) break;
-    }
-    check("посилання розкрилось у трек", Boolean(byUrl), byUrl ? `${byUrl.n}: ${byUrl.first}` : "не дочекались");
+    const byUrl = await until(`
+      if (document.querySelector('.spinner')) return null;
+      const r = document.querySelectorAll('.row');
+      return r.length ? { n: r.length, first: r[0].querySelector('b').textContent } : null;`, 40, 1000);
+    check("посилання розкрилось у трек", Boolean(byUrl), byUrl ? byUrl.first : "не дочекались");
 
     // Опитувати смужку раз на секунду недостатньо: трек качається за 2-3 с,
     // і проміжні значення просто не потрапляють у вибірку. Тому записуємо
@@ -296,38 +281,92 @@ function connect(url) {
       return true;`);
 
     await evalJs(`document.querySelector('.row [data-act=dl-one]').click(); return true`);
-    check("черга розгорнулась", (await evalJs("return !document.querySelector('#queue').classList.contains('collapsed')")) === true);
+    check("з'явилась підказка про чергу", (await until(`
+      const t = document.querySelector('#toast');
+      return (!t.hidden && t.textContent.includes('чергу')) ? true : null;`, 8, 300)) === true);
 
-    let job = null;
-    for (let i = 0; i < 180; i++) {
-      await sleep(500);
-      const cur = await evalJs(`
-        const j = [...state.jobs.values()].pop();
-        if (!j) return null;
-        const bar = document.querySelector('.job .bar > i');
-        return { status: j.status, percent: j.percent, files: j.files, error: j.error,
-                 barWidth: bar ? bar.style.width : null,
-                 note: document.querySelector('.job .jn small')?.textContent };`);
-      if (cur && (cur.status === "done" || cur.status === "error")) { job = cur; break; }
-      if (i === 6) await shot("черга-в-роботі");
-    }
+    await evalJs(`document.querySelector('.navbtn[data-page=queue]').click(); return true`);
+    check("сторінка черги показує завдання", (await evalJs("return document.querySelectorAll('.job').length")) > 0);
+    check("бейдж черги видно", (await evalJs("return !document.querySelector('#navQueue').hidden")) === true);
+    await sleep(1500);
+    await shot("черга");
 
+    const job = await until(`
+      const j = [...state.jobs.values()].pop();
+      if (!j || (j.status !== 'done' && j.status !== 'error')) return null;
+      const bar = document.querySelector('.job .bar > i');
+      return { status: j.status, files: j.files, error: j.error, barWidth: bar ? bar.style.width : null };`, 180, 500);
     const seen = (await evalJs("return window.__seen")) || [];
-    check("завдання завершилось", Boolean(job), job ? `${job.status} — ${job.note}` : "не дочекались");
+    check("завдання завершилось", Boolean(job), job ? job.status : "не дочекались");
     check("статус «готово»", job?.status === "done", job?.error || "");
-    check(
-      "інтерфейс отримував проміжний прогрес",
-      seen.some((p) => p > 0 && p < 100),
-      `${seen.length} оновлень: ${seen.map((p) => Math.round(p)).join(",").slice(0, 70)}`,
-    );
+    check("інтерфейс отримував проміжний прогрес", seen.some((p) => p > 0 && p < 100),
+      `${seen.length} оновлень`);
     check("смужка доїхала до 100%", job?.barWidth === "100%", job?.barWidth || "");
 
     const onDisk = fs.existsSync(OUT) ? fs.readdirSync(OUT) : [];
     check("файл справді на диску", onDisk.length === 1, JSON.stringify(onDisk));
-    check("це mp3 з іменем «Автор - Назва»", /^[^-]+ - .+\.mp3$/.test(onDisk[0] || ""), onDisk[0] || "");
-    await shot("черга-готово");
+    check("формат за замовчуванням — m4a без перекодування", /\.m4a$/.test(onDisk[0] || ""), onDisk[0] || "");
+    check("ім'я «Автор - Назва»", /^[^-]+ - .+\.\w+$/.test(onDisk[0] || ""), onDisk[0] || "");
 
-    console.log("\n[8] Помилки в консолі інтерфейсу");
+    console.log("\n[9] Сховище");
+    await evalJs(`document.querySelector('.navbtn[data-page=library]').click(); return true`);
+    const lib = await until(`
+      if (document.querySelector('.spinner')) return null;
+      const r = document.querySelectorAll('.row[data-path]');
+      if (!r.length) return null;
+      return { n: r.length, title: r[0].querySelector('b').textContent,
+               artist: r[0].querySelector('.sub').textContent };`, 40);
+    check("сховище знайшло завантажене", Boolean(lib), lib ? `${lib.n}: ${lib.artist} — ${lib.title}` : "не дочекались");
+    check("теги прочитані з файлу", lib?.artist === "Kevin MacLeod", lib?.artist || "");
+    await sleep(900); // дати обкладинці підвантажитись
+    check("обкладинка витягнута з файлу", (await evalJs(`
+      const im = document.querySelector('.row[data-path] .art');
+      return im && im.src.startsWith('data:image') && im.src.length > 2000;`)) === true);
+    await shot("сховище");
+
+    console.log("\n[10] Плеєр");
+    await evalJs(`document.querySelector('.row[data-path] [data-lact=play]').click(); return true`);
+    const played = await until(`
+      const a = document.querySelector('#audio');
+      return (!a.paused && a.currentTime > 0.15) ? { t: a.currentTime, d: a.duration } : null;`, 20, 400);
+    check("файл справді грає", Boolean(played), played ? `${played.t.toFixed(1)}с з ${Math.round(played.d)}с` : "не заграв");
+    check("плеєр показує назву", (await evalJs("return document.querySelector('#plTitle').textContent")) === "Cipher");
+    check("плеєр більше не «idle»", (await evalJs("return !document.querySelector('#player').classList.contains('idle')")) === true);
+    await shot("плеєр");
+    await evalJs(`document.querySelector('#plPlay').click(); return true`);
+    await sleep(300);
+    check("пауза працює", (await evalJs("return document.querySelector('#audio').paused")) === true);
+
+    console.log("\n[11] Позначка «вже є» в пошуку");
+    await evalJs(`
+      document.querySelector('.navbtn[data-page=search]').click();
+      document.querySelector('#q').value = 'Kevin MacLeod Cipher';
+      document.querySelector('#searchForm').dispatchEvent(new Event('submit', {cancelable:true}));
+      return true;`);
+    const owned = await until(`
+      if (document.querySelector('.spinner')) return null;
+      const r = document.querySelectorAll('.row');
+      if (!r.length) return null;
+      return { any: !!document.querySelector('.badge.owned'), rows: r.length };`, 40, 1000);
+    check("знайдений трек позначено як наявний", owned?.any === true, `${owned?.rows} рядків`);
+
+    console.log("\n[12] Налаштування");
+    await evalJs(`document.querySelector('.navbtn[data-page=settings]').click(); return true`);
+    await sleep(600);
+    check("сторінка намальована", (await evalJs("return document.querySelectorAll('.set').length")) >= 5);
+    check("вибір формату є, FLAC немає", (await evalJs(`
+      const o = [...document.querySelectorAll('#format option')].map(o => o.value);
+      return o.join(',') === 'm4a,mp3';`)) === true);
+    check("написано про DRM у Spotify",
+      (await evalJs("return document.querySelector('#main').textContent")).includes("DRM"));
+    check("написано про авторські права",
+      (await evalJs("return document.querySelector('#main').textContent")).includes("авторськ"));
+    check("показано знайдені бінарники", (await until(`
+      const t = document.querySelector('#binSet')?.textContent || '';
+      return t.includes('yt-dlp') && t.includes('ffmpeg') ? true : null;`, 10, 300)) === true);
+    await shot("налаштування");
+
+    console.log("\n[13] Помилки в консолі інтерфейсу");
     check("без винятків і порушень CSP", errors.length === 0, [...new Set(errors)].slice(0, 2).join(" | "));
   } catch (e) {
     console.log("  ПРОВАЛ (виняток тесту): " + e.message);
