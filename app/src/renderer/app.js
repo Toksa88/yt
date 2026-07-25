@@ -97,6 +97,37 @@ function img(url, cls, extra = "") {
   return `<img class="${cls}" src="${esc(url || BLANK)}" alt="" ${extra} />`;
 }
 
+/**
+ * Аватар з ініціалів — для виконавців, чийого фото немає (MusicBrainz його не
+ * зберігає взагалі). Раніше на їхньому місці було просто чорне тло.
+ * Колір виводимо з самого імені, щоб він був стабільним між запусками.
+ */
+function avatar(name) {
+  const text = String(name || "?").trim();
+  const initials = text
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => [...w][0] || "")
+    .join("")
+    .toUpperCase();
+
+  let hash = 0;
+  for (const ch of text) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
+  const hue = hash % 360;
+
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">` +
+    `<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">` +
+    `<stop offset="0" stop-color="hsl(${hue} 55% 42%)"/>` +
+    `<stop offset="1" stop-color="hsl(${(hue + 48) % 360} 55% 26%)"/>` +
+    `</linearGradient></defs>` +
+    `<rect width="120" height="120" fill="url(#g)"/>` +
+    `<text x="60" y="60" fill="#fff" fill-opacity="0.92" font-family="Segoe UI, sans-serif"` +
+    ` font-size="46" font-weight="600" text-anchor="middle" dominant-baseline="central">` +
+    `${esc(initials)}</text></svg>`;
+  return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
+}
+
 /** Локальний файл для тега <audio>: шлях Windows треба зробити валідним URL. */
 function fileUrl(p) {
   return "file:///" + encodeURI(String(p).replace(/\\/g, "/")).replace(/#/g, "%23");
@@ -174,7 +205,7 @@ function albumCard(a) {
 function artistCard(a) {
   return `
     <div class="card round" data-act="open-artist" data-key="${esc(keyOf(a))}">
-      ${img(a.thumb, "cover")}
+      ${img(a.thumb || avatar(a.name), "cover")}
       <div class="t">${esc(a.name)}</div>
       <div class="s">${esc(a.subtitle || "")}</div>
       <div class="s">${badge(a.source)}</div>
@@ -242,7 +273,7 @@ function renderArtist(a) {
   mainEl.innerHTML = `
     <button class="ghost back" data-act="back">← Назад</button>
     <div class="detail-head artist">
-      ${img(a.thumb, "cover")}
+      ${img(a.thumb || avatar(a.name), "cover")}
       <div class="meta">
         <div class="sub">Виконавець ${badge(a.source)}</div>
         <h1>${esc(a.name)}</h1>
@@ -261,7 +292,7 @@ function renderCatalogArtist(a, releases) {
   mainEl.innerHTML = `
     <button class="ghost back" data-act="back">← Назад</button>
     <div class="detail-head artist">
-      ${img(a.thumb, "cover")}
+      ${img(a.thumb || avatar(a.name), "cover")}
       <div class="meta">
         <div class="sub">Виконавець ${badge(a.source)}</div>
         <h1>${esc(a.name)}</h1>

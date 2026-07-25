@@ -89,7 +89,13 @@ function buildArgs(job) {
     // «за розширенням» небезпечно: поруч може качатись інший трек.
     "-P", `home:${job.outDir}`,
     "-P", `temp:${job.tempDir}`,
-    "-o", "%(artists.0,artist,uploader)s - %(track,title)s.%(ext)s",
+    // Альбом кладемо в його власну теку, щоб десяток треків не змішувався
+    // з рештою колекції. Ланцюжок запасних полів потрібен, бо в альбомів із
+    // збірками поле album порожнє — тоді береться назва плейлиста.
+    "-o",
+    (job.isPlaylist && job.albumFolder
+      ? "%(album,playlist_title,playlist,uploader)s/"
+      : "") + "%(artists.0,artist,uploader)s - %(track,title)s.%(ext)s",
     "--replace-in-metadata", "artist", ",\\s*.+$", "",
     "--embed-metadata",
     "--embed-thumbnail",

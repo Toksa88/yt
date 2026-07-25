@@ -262,12 +262,38 @@ async function itunesAlbums(query, limit = 12, searchId) {
 
 // ---------------------------------------------------------------- MusicBrainz
 
+/**
+ * Фото виконавця з Deezer.
+ *
+ * Deezer радо віддає щось на будь-який запит: на «Black Magick SS» він
+ * повертає гурт «BLACK MAGICK» — це інший гурт. Показати чуже обличчя гірше,
+ * ніж не показати нічого, тому беремо фото ЛИШЕ за точним збігом імені,
+ * а в решті випадків інтерфейс намалює аватар з ініціалами.
+ */
+async function deezerPhoto(name) {
+  const want = String(name).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  if (!want) return null;
+  try {
+    const j = await getJson(
+      `https://api.deezer.com/search/artist?q=${encodeURIComponent(name)}&limit=3`,
+      { timeout: 6000 },
+    );
+    for (const a of j.data || []) {
+      const got = String(a.name).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+      if (got === want) return a.picture_big || a.picture_medium || null;
+    }
+  } catch {
+    /* Deezer недоступний — не біда, це лише прикраса */
+  }
+  return null;
+}
+
 async function musicbrainzArtists(query, limit = 8, searchId) {
   const j = await getJson(
     `https://musicbrainz.org/ws/2/artist?query=${encodeURIComponent(query)}&fmt=json&limit=${limit}`,
     { headers: { "User-Agent": UA_MB }, searchId },
   );
-  return (j.artists || []).map((a) => ({
+  const artists = (j.artists || []).map((a) => ({
     kind: "artist",
     source: "musicbrainz",
     id: a.id,
@@ -275,8 +301,16 @@ async function musicbrainzArtists(query, limit = 8, searchId) {
     subtitle: [a.disambiguation, a.country, a["life-span"]?.begin?.slice(0, 4)]
       .filter(Boolean)
       .join(" · "),
-    thumb: null, // MusicBrainz не зберігає фото виконавців
+    thumb: null, // сам MusicBrainz фото виконавців не зберігає
   }));
+
+  // Фото шукаємо лише для перших кількох: далі це вже не варте затримки.
+  await Promise.all(
+    artists.slice(0, 5).map(async (a) => {
+      a.thumb = await deezerPhoto(a.name);
+    }),
+  );
+  return artists;
 }
 
 /** Повна дискографія з MusicBrainz — там є навіть те, чого нема на YouTube. */
