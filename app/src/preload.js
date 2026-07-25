@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld("api", {
   libScan: (dir) => call("lib:scan", dir),
   libCover: (file) => call("lib:cover", file),
   libTrash: (file) => call("lib:trash", file),
+  libTags: (files, patch) => call("lib:tags", files, patch),
 
   onClipboardLink: (cb) => ipcRenderer.on("clipboard:link", (_e, url) => cb(url)),
 

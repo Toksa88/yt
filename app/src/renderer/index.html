@@ -92,6 +92,35 @@
       <span id="selCount">0 вибрано</span>
       <button id="selNone" class="ghost">Зняти вибір</button>
       <button id="selDl" class="primary">ЗАБИРАЮ!</button>
+      <button id="selTags" class="primary" hidden>Змінити теги</button>
+    </div>
+
+    <div class="modal" id="tagModal" hidden>
+      <div class="mbox">
+        <h3 id="tagHead">Змінити теги</h3>
+        <div class="mnote" id="tagFiles"></div>
+        <label class="field">
+          <span>Виконавець</span>
+          <input type="text" id="tagArtist" spellcheck="false" />
+        </label>
+        <label class="field" id="tagTitleWrap">
+          <span>Назва</span>
+          <input type="text" id="tagTitle" spellcheck="false" />
+        </label>
+        <label class="field">
+          <span>Альбом</span>
+          <input type="text" id="tagAlbum" spellcheck="false" />
+        </label>
+        <label class="switch">
+          <input type="checkbox" id="tagRename" checked />
+          Перейменувати файли за схемою «Виконавець - Назва»
+        </label>
+        <div class="mnote" id="tagHint"></div>
+        <div class="mact">
+          <button class="ghost" id="tagCancel">Скасувати</button>
+          <button class="primary" id="tagSave">Зберегти</button>
+        </div>
+      </div>
     </div>
 
     <div class="toast" id="toast" hidden>

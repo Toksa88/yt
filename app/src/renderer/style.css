@@ -908,6 +908,56 @@ h3.sec {
   z-index: 20;
 }
 
+.modal {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #0009;
+  backdrop-filter: blur(3px);
+  z-index: 60;
+}
+.mbox {
+  width: min(520px, calc(100vw - 48px));
+  padding: 22px 24px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 20px 60px #000c;
+}
+.mbox h3 {
+  margin: 0 0 14px;
+  font-size: 18px;
+}
+.field {
+  display: block;
+  margin-bottom: 12px;
+}
+.field span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.field input {
+  width: 100%;
+}
+.mnote {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 10px 0 14px;
+}
+.mnote.err {
+  color: var(--err);
+}
+.mact {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
 .toast {
   position: fixed;
   right: 20px;

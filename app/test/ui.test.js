@@ -315,9 +315,12 @@ function connect(url) {
       const r = document.querySelectorAll('.row[data-path]');
       if (!r.length) return null;
       return { n: r.length, title: r[0].querySelector('b').textContent,
-               artist: r[0].querySelector('.sub').textContent };`, 40);
+               // Перший текстовий вузол, бо далі в тому ж рядку йде бейдж бітрейту.
+               artist: r[0].querySelector('.sub').childNodes[0].textContent,
+               tech: r[0].querySelector('.sub .badge')?.textContent || '' };`, 40);
     check("сховище знайшло завантажене", Boolean(lib), lib ? `${lib.n}: ${lib.artist} — ${lib.title}` : "не дочекались");
     check("теги прочитані з файлу", lib?.artist === "Kevin MacLeod", lib?.artist || "");
+    check("показано формат і бітрейт", /^m4a \d+ kb\/s$/.test(lib?.tech || ""), lib?.tech || "");
     await sleep(900); // дати обкладинці підвантажитись
     check("обкладинка витягнута з файлу", (await evalJs(`
       const im = document.querySelector('.row[data-path] .art');
@@ -337,7 +340,7 @@ function connect(url) {
     await sleep(300);
     check("пауза працює", (await evalJs("return document.querySelector('#audio').paused")) === true);
 
-    console.log("\n[11] Позначка «вже є» в пошуку");
+    console.log("\n[10b] Позначка «вже є» в пошуку");
     await evalJs(`
       document.querySelector('.navbtn[data-page=search]').click();
       document.querySelector('#q').value = 'Kevin MacLeod Cipher';
@@ -350,13 +353,58 @@ function connect(url) {
       return { any: !!document.querySelector('.badge.owned'), rows: r.length };`, 40, 1000);
     check("знайдений трек позначено як наявний", owned?.any === true, `${owned?.rows} рядків`);
 
+    console.log("\n[11] Редактор тегів");
+    await evalJs(`document.querySelector('.navbtn[data-page=library]').click(); return true`);
+    await until(`return document.querySelector('.row[data-path]') ? true : null`, 20, 400);
+    const before = fs.readdirSync(OUT)[0];
+    await evalJs(`document.querySelector('.row[data-path] [data-lact=tags]').click(); return true`);
+    await sleep(400);
+    check("вікно редактора відкрилось", (await evalJs("return !document.querySelector('#tagModal').hidden")) === true);
+    check("поля заповнені поточними тегами", (await evalJs(`
+      return document.querySelector('#tagArtist').value + '|' + document.querySelector('#tagTitle').value;`))
+      === "Kevin MacLeod|Cipher");
+    await shot("редактор-тегів");
+
+    await evalJs(`
+      document.querySelector('#tagArtist').value = 'Тест Виконавець';
+      document.querySelector('#tagTitle').value = 'Тест Назва';
+      document.querySelector('#tagAlbum').value = 'Тест Альбом';
+      document.querySelector('#tagSave').click();
+      return true;`);
+    const saved = await until(`
+      if (!document.querySelector('#tagModal').hidden) return null;
+      const r = document.querySelector('.row[data-path]');
+      if (!r) return null;
+      const t = r.querySelector('b').textContent;
+      return t === 'Тест Назва'
+        ? { title: t, artist: r.querySelector('.sub').childNodes[0].textContent, path: r.dataset.path }
+        : null;`, 30);
+    check("теги збережено й список оновився", Boolean(saved), saved ? `${saved.artist}` : "не дочекались");
+    check("виконавця змінено", saved?.artist === "Тест Виконавець", saved?.artist || "");
+
+    const after = fs.readdirSync(OUT);
+    check("файл перейменовано за новими тегами", after.length === 1 && /^Тест Виконавець - Тест Назва\./.test(after[0]),
+      `${before} -> ${after.join()}`);
+    // Найважливіше: правка тегів не має чіпати ані звук, ані обкладинку.
+    check("обкладинка й тривалість не постраждали", (await evalJs(`
+      const r = document.querySelector('.row[data-path]');
+      return r.querySelector('.dur').textContent;`)) === "3:51");
+    await sleep(900);
+    check("обкладинка все ще всередині файлу", (await evalJs(`
+      const im = document.querySelector('.row[data-path] .art');
+      return im && im.src.startsWith('data:image') && im.src.length > 2000;`)) === true);
+    await shot("теги-змінено");
+
     console.log("\n[12] Налаштування");
     await evalJs(`document.querySelector('.navbtn[data-page=settings]').click(); return true`);
     await sleep(600);
     check("сторінка намальована", (await evalJs("return document.querySelectorAll('.set').length")) >= 5);
     check("вибір формату є, FLAC немає", (await evalJs(`
       const o = [...document.querySelectorAll('#format option')].map(o => o.value);
-      return o.join(',') === 'm4a,mp3';`)) === true);
+      return o.join(',') === 'm4a,opus,mp3';`)) === true);
+    check("чесно сказано про бітрейти", (await evalJs(`
+      const t = document.querySelector('#main').textContent;
+      return t.includes('155') && t.includes('130') && !t.includes('FLAC —');`)) === true);
     check("написано про DRM у Spotify",
       (await evalJs("return document.querySelector('#main').textContent")).includes("DRM"));
     check("написано про авторські права",

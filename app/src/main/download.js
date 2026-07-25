@@ -69,8 +69,16 @@ function buildArgs(job) {
   const args = [];
 
   if (job.format === "mp3") {
+    // Єдиний варіант із перекодуванням: mp3 у джерелах не існує.
     args.push("-f", "bestaudio/best", "-x", "--audio-format", "mp3", "--audio-quality", "320K");
+  } else if (job.format === "opus") {
+    // Найкраще, що взагалі є: на YouTube opus іде ~155 kb/s проти 130 kb/s
+    // у m4a. Обкладинку в ogg/opus вшиває mutagen (він усередині yt-dlp).
+    args.push("-f", "bestaudio/best", "-x", "--audio-format", "opus");
   } else {
+    // bestaudio часто віддає webm/opus (він виграє за бітрейтом) — а в webm
+    // обкладинку вшити НЕ можна. Тому просимо саме m4a: ffmpeg лише
+    // перекладає контейнер, без перекодування.
     args.push("-f", "bestaudio[ext=m4a]/bestaudio/best", "-x", "--audio-format", "m4a");
   }
 
@@ -300,7 +308,7 @@ function add(items, opts) {
       outDir: opts.outDir,
       tempDir: path.join(TEMP_ROOT, `j${seq}`),
       attempt: 0,
-      format: opts.format === "m4a" ? "m4a" : "mp3",
+      format: ["m4a", "mp3", "opus"].includes(opts.format) ? opts.format : "m4a",
       status: "queued",
       percent: 0,
       speed: 0,

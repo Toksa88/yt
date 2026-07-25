@@ -8,6 +8,7 @@ const search = require("./search");
 const downloads = require("./download");
 const settings = require("./settings");
 const library = require("./library");
+const tags = require("./tags");
 
 let win = null;
 
@@ -160,6 +161,34 @@ handle("dialog:folder", async () => {
 });
 
 handle("lib:scan", (dir) => library.scan(dir || settings.load().outDir));
+
+/**
+ * @param {Array<{path: string, title: string}>} items файли з їхніми поточними назвами
+ * @param {object} patch спільні зміни для всіх
+ */
+handle("lib:tags", async (items, patch) => {
+  const results = [];
+  for (const it of items) {
+    // При масовій правці назву не задають (вона своя в кожного файлу), але
+    // перейменувати треба все одно — тож підставляємо назву самого файлу.
+    const own = { ...patch };
+    if (own.rename && !own.title) own.title = it.title;
+    if (own.rename && !own.artist) own.artist = it.artist;
+
+    try {
+      const r = await tags.write(it.path, own);
+      library.forget(it.path);
+      library.forget(r.path);
+      results.push({ file: it.path, ok: true, path: r.path, renamed: r.renamed });
+    } catch (e) {
+      // Один заблокований файл не має зривати правку решти — але й мовчати
+      // про нього не можна, тому кожен результат повертаємо окремо.
+      results.push({ file: it.path, ok: false, error: e.message });
+    }
+  }
+  return results;
+});
+
 handle("lib:cover", (file) => library.cover(file));
 
 // Саме в кошик, а не назавжди: помилковий клік не має нищити музику.

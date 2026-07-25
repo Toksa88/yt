@@ -17,6 +17,8 @@ const state = {
   /** null або ідентифікатор пошуку, що зараз виконується (для «Стоп») */
   searchId: null,
   library: { dir: "", tracks: [], missing: false, loaded: false, loading: false },
+  /** шляхи файлів, обраних у Сховищі для правки тегів */
+  libPicked: new Set(),
   /** ключі «виконавець|назва» того, що вже лежить на диску */
   owned: new Set(),
   playing: null,
@@ -350,18 +352,22 @@ function refreshQueueBadge() {
 
 function libRow(t) {
   const isPlaying = state.playing?.path === t.path;
+  const on = state.libPicked.has(t.path);
   return `
-    <div class="row${isPlaying ? " playing" : ""}" data-path="${esc(t.path)}">
-      <span></span>
+    <div class="row${isPlaying ? " playing" : ""}${on ? " sel" : ""}" data-path="${esc(t.path)}">
+      <input type="checkbox" data-lact="pick" ${on ? "checked" : ""} />
       ${img(null, "art", `data-cover="${esc(t.path)}"`)}
       <div class="name">
         <b>${esc(t.title)}</b>
-        <span class="sub">${esc(t.artist || "невідомий виконавець")}</span>
+        <span class="sub">${esc(t.artist || "невідомий виконавець")}${
+          t.bitrate ? `<span class="badge url">${t.ext} ${t.bitrate} kb/s</span>` : ""
+        }</span>
       </div>
       <div class="alb">${esc(t.album || "")}</div>
       <div class="dur">${dur(t.duration)}</div>
       <div class="act">
         <button data-lact="play" class="primary">${isPlaying && !audio.paused ? "❚❚" : "▶"}</button>
+        <button data-lact="tags" class="ghost">Теги</button>
         <button data-lact="reveal" class="ghost">Показати</button>
         <button data-lact="trash" class="ghost danger">У кошик</button>
       </div>
@@ -469,15 +475,21 @@ function renderSettings() {
       <div class="set">
         <h4>Формат файлу</h4>
         <p>
-          Джерела віддають стиснутий звук — lossless там немає, тому й FLAC у списку немає:
-          він зробив би файл утричі більшим без жодного виграшу в якості.
-          <b>M4A</b> — це рідний потік без перекодування, найкраща якість.
-          <b>MP3</b> — ще одне стиснення поверх стиснутого, але його розуміє будь-яка магнітола.
+          Джерела віддають лише стиснутий звук — lossless там немає взагалі, тому FLAC у списку
+          відсутній: він зробив би файл утричі більшим без жодного виграшу в якості.
+        </p>
+        <p>
+          <b>OPUS</b> — найкраще, що дає YouTube (близько 155&nbsp;kb/s), без перекодування.
+          Але це молодий формат: Android і комп'ютер його грають, а старі магнітоли та iPhone — ні.<br />
+          <b>M4A</b> — теж без перекодування, але потік слабший (близько 130&nbsp;kb/s). Грає скрізь.<br />
+          <b>MP3&nbsp;320</b> — єдиний варіант із перекодуванням: mp3 у джерелах не існує, тож це
+          ще одне стиснення поверх стиснутого. Варто брати лише заради дуже старої техніки.
         </p>
         <div class="ctl">
           <select id="format">
-            <option value="m4a"${s.format === "m4a" ? " selected" : ""}>M4A — як є, без перекодування</option>
-            <option value="mp3"${s.format === "mp3" ? " selected" : ""}>MP3 320 — для старих плеєрів</option>
+            <option value="m4a"${s.format === "m4a" ? " selected" : ""}>M4A — грає скрізь (рекомендовано)</option>
+            <option value="opus"${s.format === "opus" ? " selected" : ""}>OPUS — найкраща якість</option>
+            <option value="mp3"${s.format === "mp3" ? " selected" : ""}>MP3 320 — для старої техніки</option>
           </select>
         </div>
       </div>
@@ -565,9 +577,12 @@ function goto(page) {
 }
 
 function refreshSelbar() {
-  const n = state.picked.size;
-  $("#selbar").hidden = n === 0 || state.page !== "search";
+  const isLib = state.page === "library";
+  const n = isLib ? state.libPicked.size : state.picked.size;
+  $("#selbar").hidden = n === 0 || !["search", "library"].includes(state.page);
   $("#selCount").textContent = `${n} вибрано`;
+  $("#selDl").hidden = isLib;
+  $("#selTags").hidden = !isLib;
 }
 
 // ------------------------------------------------------------------ пошук
@@ -725,6 +740,85 @@ function clearPicks() {
   refreshSelbar();
 }
 
+// ------------------------------------------------------------------ теги
+
+let tagTargets = [];
+
+function openTagEditor(paths) {
+  tagTargets = paths.map((p) => state.library.tracks.find((t) => t.path === p)).filter(Boolean);
+  if (!tagTargets.length) return;
+
+  const one = tagTargets.length === 1;
+  const same = (key) => {
+    const v = tagTargets[0][key] || "";
+    return tagTargets.every((t) => (t[key] || "") === v) ? v : "";
+  };
+
+  $("#tagHead").textContent = one ? "Змінити теги" : `Змінити теги: ${plural(tagTargets.length, FILES)}`;
+  $("#tagFiles").textContent = one
+    ? tagTargets[0].file
+    : tagTargets.slice(0, 3).map((t) => t.file).join(", ") + (tagTargets.length > 3 ? " …" : "");
+  $("#tagArtist").value = same("artist");
+  $("#tagTitle").value = one ? tagTargets[0].title : "";
+  $("#tagAlbum").value = same("album");
+  $("#tagTitleWrap").hidden = !one;
+  $("#tagRename").checked = true;
+  $("#tagHint").className = "mnote";
+  $("#tagHint").textContent = one
+    ? "Порожнє поле означає «не чіпати». Звук і обкладинка не змінюються."
+    : "Порожнє поле означає «не чіпати». Назви не показано — вона своя в кожного файлу; " +
+      "при перейменуванні кожен трек збереже власну назву.";
+  $("#tagModal").hidden = false;
+  $("#tagArtist").focus();
+}
+
+async function saveTags() {
+  const artist = $("#tagArtist").value.trim();
+  const title = $("#tagTitleWrap").hidden ? "" : $("#tagTitle").value.trim();
+  const album = $("#tagAlbum").value.trim();
+  const rename = $("#tagRename").checked;
+
+  const patch = {};
+  if (artist) patch.artist = artist;
+  if (title) patch.title = title;
+  if (album) patch.album = album;
+  if (!Object.keys(patch).length) {
+    $("#tagHint").className = "mnote err";
+    $("#tagHint").textContent = "Нема чого зберігати — усі поля порожні.";
+    return;
+  }
+
+  // Файл, який зараз відкритий плеєром, Windows не дасть перейменувати:
+  // звільняємо його, перш ніж чіпати.
+  if (tagTargets.some((t) => t.path === state.playing?.path)) stopPlayback();
+
+  $("#tagSave").disabled = true;
+  $("#tagSave").textContent = "Зберігаю…";
+  try {
+    // Передаємо поточні назву й виконавця кожного файлу: при масовій правці
+    // ім'я має скластись із нового виконавця та ВЛАСНОЇ назви кожного треку.
+    const items = tagTargets.map((t) => ({ path: t.path, title: t.title, artist: t.artist }));
+    const results = await window.api.libTags(items, { ...patch, rename });
+
+    const bad = results.filter((r) => !r.ok);
+    $("#tagModal").hidden = true;
+    state.libPicked.clear();
+    await loadLibrary(true);
+
+    if (bad.length) {
+      toast(`Не вдалося змінити ${plural(bad.length, FILES)}: ${bad[0].error}`, [], 12000);
+    } else {
+      toast(`Теги оновлено: ${plural(results.length, FILES)}`, [], 4000);
+    }
+  } catch (e) {
+    $("#tagHint").className = "mnote err";
+    $("#tagHint").textContent = "Не вдалося: " + e.message;
+  } finally {
+    $("#tagSave").disabled = false;
+    $("#tagSave").textContent = "Зберегти";
+  }
+}
+
 // ------------------------------------------------------------------ плеєр
 
 function play(track) {
@@ -747,6 +841,20 @@ function play(track) {
     $("#plSeek").disabled = false;
   }
   audio.play().catch((e) => toast("Не вдалося відтворити: " + e.message));
+}
+
+/** Повністю відпускає файл: інакше Windows не дасть його перейменувати. */
+function stopPlayback() {
+  audio.pause();
+  audio.removeAttribute("src");
+  audio.load();
+  state.playing = null;
+  $("#player").classList.add("idle");
+  $("#plPlay").disabled = true;
+  $("#plSeek").disabled = true;
+  $("#plTitle").textContent = "Нічого не грає";
+  $("#plArtist").textContent = "Натисни ▶ на треку у Сховищі";
+  $("#plArt").src = BLANK;
 }
 
 function syncPlayBtn() {
@@ -833,6 +941,14 @@ mainEl.addEventListener("click", (e) => {
     const p = lb.closest("[data-path]")?.dataset.path;
     const track = state.library.tracks.find((t) => t.path === p);
     if (!track) return;
+    if (lb.dataset.lact === "pick") {
+      if (lb.checked) state.libPicked.add(p);
+      else state.libPicked.delete(p);
+      lb.closest(".row").classList.toggle("sel", lb.checked);
+      refreshSelbar();
+      return;
+    }
+    if (lb.dataset.lact === "tags") return openTagEditor([p]);
     if (lb.dataset.lact === "play") return play(track);
     if (lb.dataset.lact === "reveal") return window.api.reveal(p);
     if (lb.dataset.lact === "trash") {
@@ -902,7 +1018,26 @@ mainEl.addEventListener(
   true,
 );
 
-$("#selNone").addEventListener("click", clearPicks);
+$("#selNone").addEventListener("click", () => {
+  if (state.page === "library") {
+    state.libPicked.clear();
+    mainEl.querySelectorAll('input[data-lact="pick"]').forEach((cb) => (cb.checked = false));
+    mainEl.querySelectorAll(".row.sel").forEach((r) => r.classList.remove("sel"));
+    refreshSelbar();
+  } else clearPicks();
+});
+
+$("#selTags").addEventListener("click", () => openTagEditor([...state.libPicked]));
+$("#tagCancel").addEventListener("click", () => ($("#tagModal").hidden = true));
+$("#tagSave").addEventListener("click", saveTags);
+$("#tagModal").addEventListener("click", (e) => {
+  if (e.target.id === "tagModal") $("#tagModal").hidden = true;
+});
+document.addEventListener("keydown", (e) => {
+  if ($("#tagModal").hidden) return;
+  if (e.key === "Escape") $("#tagModal").hidden = true;
+  if (e.key === "Enter" && e.target.tagName === "INPUT") saveTags();
+});
 $("#selDl").addEventListener("click", () => {
   const items = [...state.picked.values()];
   clearPicks();
