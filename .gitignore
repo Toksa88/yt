@@ -1,0 +1,27 @@
+# --- Завантажена музика та обкладинки (медіа в git не тримають) ---
+*.mp3
+*.m4a
+*.opus
+*.webm
+*.webp
+*.jpg
+*.jpeg
+*.png
+*.part
+*.ytdl
+
+# --- Артефакти збірки PyInstaller ---
+build/
+dist/
+*.spec
+
+# --- Особисті налаштування (свої шляхи в кожного) ---
+settings.json
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
