@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src https: data:; font-src 'self';"
+    />
+    <title>Music Grabber</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand"><span class="logo">♫</span> Music&nbsp;Grabber</div>
+
+      <form class="searchbox" id="searchForm" autocomplete="off">
+        <input
+          id="q"
+          type="text"
+          placeholder="Виконавець, альбом, пісня — або встав посилання"
+          spellcheck="false"
+        />
+        <button type="submit" id="go">Пошук</button>
+        <button type="button" id="stop" class="ghost" hidden>Стоп</button>
+      </form>
+
+      <div class="prefs">
+        <label class="fmt">
+          Формат
+          <select id="format">
+            <option value="mp3">MP3 320</option>
+            <option value="m4a">M4A (оригінал)</option>
+          </select>
+        </label>
+        <button id="folderBtn" class="ghost" title="Обрати теку">
+          <span class="ico">📁</span><span id="folderName">…</span>
+        </button>
+      </div>
+    </header>
+
+    <div id="warn" class="warn" hidden></div>
+
+    <nav class="tabs" id="tabs" hidden>
+      <button class="tab active" data-tab="songs">Треки <b class="cnt">0</b></button>
+      <button class="tab" data-tab="albums">Альбоми <b class="cnt">0</b></button>
+      <button class="tab" data-tab="artists">Виконавці <b class="cnt">0</b></button>
+
+      <div class="sources" id="sources">
+        <label><input type="checkbox" value="ytmusic" checked /> YouTube Music</label>
+        <label><input type="checkbox" value="soundcloud" checked /> SoundCloud</label>
+        <label><input type="checkbox" value="itunes" checked /> iTunes</label>
+        <label><input type="checkbox" value="musicbrainz" checked /> MusicBrainz</label>
+      </div>
+    </nav>
+
+    <main id="main">
+      <div class="empty">
+        <div class="empty-ico">♫</div>
+        <h2>Знайди музику</h2>
+        <p>
+          Введи назву пісні, альбому чи виконавця — пошук іде одразу по YouTube&nbsp;Music,
+          SoundCloud, iTunes і MusicBrainz. Посилання теж працює.
+        </p>
+        <p class="legal">
+          Завантажуй лише те, на що маєш право: власні записи, музику під вільною ліцензією
+          або суспільне надбання. Відповідальність за дотримання авторських прав — на тобі.
+        </p>
+      </div>
+    </main>
+
+    <div class="selbar" id="selbar" hidden>
+      <span id="selCount">0 вибрано</span>
+      <button id="selNone" class="ghost">Зняти вибір</button>
+      <button id="selDl" class="primary">Завантажити вибране</button>
+    </div>
+
+    <aside class="queue collapsed" id="queue">
+      <header id="queueHead">
+        <span class="qtitle">Черга <b id="qBadge">0</b></span>
+        <span class="qspacer"></span>
+        <button id="qOpen" class="ghost" title="Відкрити теку">Тека</button>
+        <button id="qClear" class="ghost">Очистити</button>
+        <button id="qToggle" class="ghost caret">▴</button>
+      </header>
+      <div class="qbody" id="qBody"></div>
+    </aside>
+
+    <script src="app.js"></script>
+  </body>
+</html>

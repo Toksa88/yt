@@ -15,6 +15,11 @@ build/
 dist/
 *.spec
 
+# --- Node / Electron ---
+node_modules/
+# сюди кладуться вшиті yt-dlp.exe та ffmpeg.exe — це чужі бінарники, не наш код
+app/bin/
+
 # --- Особисті налаштування (свої шляхи в кожного) ---
 settings.json
 

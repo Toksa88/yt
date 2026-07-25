@@ -1,0 +1,22 @@
+{
+  "name": "music-grabber",
+  "version": "1.0.0",
+  "description": "Пошук і завантаження музики з YouTube Music, SoundCloud та Bandcamp",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win",
+    "test": "node test/download.test.js && node test/ui.test.js",
+    "test:download": "node test/download.test.js",
+    "test:ui": "node test/ui.test.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ytmusic-api": "^5.3.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  }
+}
