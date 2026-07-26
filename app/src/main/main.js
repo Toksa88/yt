@@ -207,7 +207,7 @@ handle("lib:trash", async (file) => {
   return true;
 });
 
-handle("stream:url", (url) => stream.resolve(url));
+handle("stream:url", (url, force) => stream.resolve(url, force));
 
 handle("reco:radio", (videoId) => search.radio(videoId));
 handle("reco:home", () => search.home());

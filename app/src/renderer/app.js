@@ -129,6 +129,7 @@ const ICONS = {
   radio: '<circle cx="12" cy="12" r="2.4"/><path d="M8.2 8.2a5.4 5.4 0 0 0 0 7.6"/><path d="M15.8 15.8a5.4 5.4 0 0 0 0-7.6"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8"/><path d="M18.4 18.4a9 9 0 0 0 0-12.8"/>',
   shuffle: '<path d="M17 4.5 20 7l-3 2.5"/><path d="M17 14.5 20 17l-3 2.5"/><path d="M4 7h3.5l9 10H20"/><path d="M4 17h3.5l2.4-2.7"/><path d="M14.1 9.7 16.5 7H20"/>',
   repeat: '<path d="M7.5 4.5 5 7l2.5 2.5"/><path d="M16.5 19.5 19 17l-2.5-2.5"/><path d="M5 7h11a3 3 0 0 1 3 3v1"/><path d="M19 17H8a3 3 0 0 1-3-3v-1"/>',
+  lyrics: '<path d="M4.5 6h11"/><path d="M4.5 10.5h11"/><path d="M4.5 15h7"/><circle cx="17.5" cy="17" r="2.2"/><path d="M19.7 17V9.5"/>',
 };
 
 function icon(name, cls = "") {
@@ -1203,6 +1204,7 @@ async function play(track, list) {
   }
 
   state.playing = track;
+  loadLyrics(); // якщо панель відкрита — показати текст уже нового треку
   $("#plTitle").textContent = track.title;
   $("#plArtist").textContent = track.artist || "невідомий виконавець";
   $("#plArt").src = track.thumb || BLANK;
@@ -1223,6 +1225,7 @@ async function play(track, list) {
     try {
       const url = await window.api.streamUrl(track.url);
       if (trackKey(state.playing) !== trackKey(track)) return; // встигли перемкнути
+      streamRetried = false;
       audio.src = url;
       $("#plArtist").textContent = track.artist || "невідомий виконавець";
     } catch (e) {
@@ -1281,6 +1284,58 @@ function syncNavBtns() {
   $("#plPrev").disabled = !(i > 0);
   // У перемішаному режимі та при повторі списку «наступний» є завжди.
   $("#plNext").disabled = !(i >= 0 && (state.shuffle || state.repeat === "all" || i < list.length - 1));
+}
+
+/**
+ * Ключ для пошуку тексту пісні.
+ *
+ * У результатів пошуку та радіо id — це і є відео YouTube. Для файлів на диску
+ * ідентифікатор виймається з тегів під час читання Сховища, тому текст
+ * знаходиться і для вже завантаженого.
+ */
+function videoIdOf(t) {
+  if (!t) return null;
+  if (t.videoId) return t.videoId;
+  if (t.source === "ytmusic" && /^[\w-]{11}$/.test(String(t.id || ""))) return t.id;
+  return null;
+}
+
+function toggleLyrics() {
+  const panel = $("#lyricsPanel");
+  panel.hidden = !panel.hidden;
+  if (!panel.hidden) loadLyrics();
+}
+
+async function loadLyrics() {
+  const panel = $("#lyricsPanel");
+  if (panel.hidden) return;
+
+  const t = state.playing;
+  $("#lyricsTitle").textContent = t ? `${t.artist ? t.artist + " — " : ""}${t.title}` : "Текст пісні";
+
+  if (!t) {
+    $("#lyricsBody").innerHTML = `<div class="note">Спершу увімкни трек.</div>`;
+    return;
+  }
+
+  const id = videoIdOf(t);
+  if (!id) {
+    $("#lyricsBody").innerHTML =
+      `<div class="note">Для цього джерела тексту немає — він шукається лише за треками YouTube Music.</div>`;
+    return;
+  }
+
+  $("#lyricsBody").innerHTML = `<div class="empty"><div class="spinner"></div></div>`;
+  try {
+    const text = await window.api.lyrics(id);
+    // Поки чекали, трек могли перемкнути — не показуємо чужий текст.
+    if (videoIdOf(state.playing) !== id) return;
+    $("#lyricsBody").innerHTML = text
+      ? `<pre class="ltext">${esc(text)}</pre>`
+      : `<div class="note">Тексту для цієї пісні немає. Для інструменталу це нормально.</div>`;
+  } catch (e) {
+    $("#lyricsBody").innerHTML = `<div class="note err">Не вдалося отримати текст: ${esc(e.message)}</div>`;
+  }
 }
 
 /** Те, що зараз грає, — у статус Discord. */
@@ -1358,8 +1413,33 @@ audio.addEventListener("timeupdate", () => {
   $("#plNow").textContent = dur(audio.currentTime);
   if (audio.duration) $("#plSeek").value = String((audio.currentTime / audio.duration) * 1000);
 });
-audio.addEventListener("error", () => {
-  if (audio.src) toast("Файл не відтворюється — можливо, його видалили або формат не підтримується.");
+/** Щоб одна невдача не перетворилась на нескінченне перезапитування. */
+let streamRetried = false;
+
+audio.addEventListener("error", async () => {
+  if (!audio.src) return;
+  const t = state.playing;
+
+  // Посилання на потік прив'язане до часу і зрідка віддає 403 раніше свого ж
+  // терміну. Тоді треба не скаржитись, а перепитати yt-dlp свіже — рівно раз.
+  if (t && !t.path && t.url && !streamRetried) {
+    streamRetried = true;
+    try {
+      const fresh = await window.api.streamUrl(t.url, true);
+      if (trackKey(state.playing) !== trackKey(t)) return;
+      audio.src = fresh;
+      audio.play().catch(() => {});
+      return;
+    } catch {
+      /* нижче скажемо чесно */
+    }
+  }
+
+  toast(
+    t && !t.path
+      ? "Потік не відкрився. Спробуй ще раз — YouTube зрідка віддає тимчасову помилку."
+      : "Файл не відтворюється — можливо, його видалили або формат не підтримується.",
+  );
 });
 
 $("#plPlay").addEventListener("click", () => (audio.paused ? audio.play() : audio.pause()));
@@ -1368,6 +1448,8 @@ $("#plNext").addEventListener("click", () => {
   const n = nextIndex(false);
   if (n >= 0) playAt(n);
 });
+$("#plLyrics").addEventListener("click", toggleLyrics);
+$("#lyricsClose").addEventListener("click", () => ($("#lyricsPanel").hidden = true));
 $("#plShuffle").addEventListener("click", () => {
   state.shuffle = !state.shuffle;
   syncModeBtns();

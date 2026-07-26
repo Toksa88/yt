@@ -20,7 +20,13 @@ function expiryOf(url) {
   return Date.now() + 30 * 60 * 1000;
 }
 
-function resolve(pageUrl) {
+/**
+ * @param {string} pageUrl сторінка треку
+ * @param {boolean} [force] не брати з кешу — потрібно, коли плеєр отримав 403
+ *   на вже виданому посиланні: воно могло протухнути раніше свого ж терміну.
+ */
+function resolve(pageUrl, force = false) {
+  if (force) cache.delete(pageUrl);
   const hit = cache.get(pageUrl);
   if (hit && hit.expires > Date.now()) return Promise.resolve(hit.url);
 

@@ -88,10 +88,16 @@ function connect(url) {
   const errors = [];
   // Сюди потрапляють і порушення CSP: вони не кидають винятку, тож інакше
   // мертва смужка прогресу так і лишилась би «успішним» тестом.
+  const netErrors = [];
   cdp.on((msg) => {
     if (msg.method !== "Log.entryAdded") return;
     const e = msg.params.entry;
-    if (e.level === "error") errors.push(`${e.source}: ${e.text}`.slice(0, 160));
+    if (e.level !== "error") return;
+    // Мережеві збої чужих серверів (той самий плаваючий 403 від YouTube) — це
+    // не поломка нашого коду, і на них є повтор. Тримаємо їх окремо, щоб вони
+    // не ховали справжні помилки й самі не валили прогін.
+    if (e.source === "network") netErrors.push(e.text.slice(0, 120));
+    else errors.push(`${e.source}: ${e.text}`.slice(0, 160));
   });
 
   const evalJs = async (expr) => {
@@ -514,6 +520,38 @@ function connect(url) {
     await evalJs(`document.querySelector('#audio').pause(); return true`);
     await evalJs(`document.querySelector('#plPlay').click(); return true`);
 
+    console.log("\n[11b2] Текст пісні");
+    // Ставимо на відтворення трек, у якого текст точно є.
+    await evalJs(`
+      document.querySelector('.navbtn[data-page=search]').click();
+      document.querySelector('#q').value = 'Nirvana Smells Like Teen Spirit';
+      document.querySelector('#searchForm').dispatchEvent(new Event('submit', {cancelable:true}));
+      return true;`);
+    await until(`
+      if (document.querySelector('.spinner')) return null;
+      return document.querySelector('.row [data-act=listen]') ? true : null;`, 40, 1000);
+    await evalJs(`document.querySelector('.row [data-act=listen]').click(); return true`);
+    await until(`return state.playing ? true : null`, 20, 400);
+
+    await evalJs(`document.querySelector('#plLyrics').click(); return true`);
+    check("панель тексту відкрилась", (await evalJs("return !document.querySelector('#lyricsPanel').hidden")) === true);
+    // Перевіряємо лише те, що текст прийшов і в панелі є заголовок треку —
+    // сам текст не друкуємо.
+    const lyr = await until(`
+      const pre = document.querySelector('#lyricsBody .ltext');
+      const note = document.querySelector('#lyricsBody .note');
+      if (pre) return { len: pre.textContent.length, lines: pre.textContent.split('\\n').length };
+      if (note) return { note: note.textContent.slice(0, 60) };
+      return null;`, 25, 600);
+    check("текст завантажився", lyr?.len > 200, lyr?.len ? `${lyr.len} символів, ${lyr.lines} рядків` : lyr?.note || "нічого");
+    check("у заголовку панелі — назва треку",
+      (await evalJs("return document.querySelector('#lyricsTitle').textContent")).includes("Teen Spirit"));
+    await shot("текст-пісні");
+
+    await evalJs(`document.querySelector('#lyricsClose').click(); return true`);
+    check("панель закривається", (await evalJs("return document.querySelector('#lyricsPanel').hidden")) === true);
+    await evalJs(`document.querySelector('#audio').pause(); return true`);
+
     console.log("\n[11c] Плейлисти");
     // Плейлисти лежать у справжніх даних користувача, тому прибираємо за
     // собою: інакше кожен запуск лишав би сміття і ламав наступний.
@@ -646,6 +684,9 @@ function connect(url) {
 
     console.log("\n[13] Помилки в консолі інтерфейсу");
     check("без винятків і порушень CSP", errors.length === 0, [...new Set(errors)].slice(0, 2).join(" | "));
+    if (netErrors.length) {
+      console.log(`  (мережевих збоїв чужих серверів: ${netErrors.length} — на них є повтор, тест не валять)`);
+    }
   } catch (e) {
     console.log("  ПРОВАЛ (виняток тесту): " + e.message);
     failures++;
