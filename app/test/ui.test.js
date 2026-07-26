@@ -18,6 +18,16 @@ const APP = path.join(__dirname, "..");
 const ELECTRON = path.join(APP, "node_modules", "electron", "dist", "electron.exe");
 const OUT = path.join(os.tmpdir(), "mg-ui-test");
 
+/**
+ * Власний профіль для тестів.
+ *
+ * Без нього тест писав у СПРАВЖНІ налаштування користувача: вимикав Discord і
+ * лишав у них вигаданий ID додатка, після чого інтеграція переставала
+ * працювати вже поза тестом. Тут же живуть плейлисти, улюблене та історія —
+ * жодне з цього тест чіпати не має права.
+ */
+const PROFILE = path.join(os.tmpdir(), "mg-test-profile");
+
 let failures = 0;
 const check = (name, ok, extra = "") => {
   console.log(`  ${ok ? "OK  " : "ПРОВАЛ"} ${name}${extra ? " — " + extra : ""}`);
@@ -72,7 +82,9 @@ function connect(url) {
 (async () => {
   fs.rmSync(OUT, { recursive: true, force: true });
 
-  const child = spawn(ELECTRON, [APP, `--remote-debugging-port=${PORT}`], {
+  fs.rmSync(PROFILE, { recursive: true, force: true });
+
+  const child = spawn(ELECTRON, [APP, `--remote-debugging-port=${PORT}`, `--user-data-dir=${PROFILE}`], {
     cwd: APP,
     env: { ...process.env, MG_DEBUG: "1" },
     stdio: ["ignore", "pipe", "pipe"],
@@ -168,6 +180,11 @@ function connect(url) {
       const el = document.querySelector('#selbar');
       return el.hidden && getComputedStyle(el).display === 'none';`)) === true);
     check("попередження про бінарники не показано", (await evalJs("return document.querySelector('#warn').hidden")) === true);
+    // Регресія: тест писав у справжні налаштування користувача — вимикав там
+    // Discord і лишав вигаданий ID. Тепер у нього власний профіль.
+    check("тест працює у власному профілі, не в користувацькому", (await evalJs(`
+      const p = await window.api.getSettings();
+      return p.discordAppId === '' && p.discordEnabled === false;`)) === true);
     // Емодзі кожна система малює по-своєму, тому інтерфейс має бути на SVG.
     check("іконки — SVG, а не емодзі", (await evalJs(`
       const svgs = document.querySelectorAll('.nico svg.ic, .sico svg.ic, .pbtn svg.ic');
@@ -458,13 +475,15 @@ function connect(url) {
     check("назва не обрізана", cols?.cut === false, `колонка назви ${cols?.name}px із ${cols?.row}px`);
     check("колонка назви отримала місце", cols?.name > cols?.row * 0.35, `${cols?.name}px`);
     check("кнопки не займають місця в потоці", cols?.actAbsolute === "absolute", cols?.actAbsolute || "");
-    // Обкладинки вантажаться ліниво (IntersectionObserver), тому не «поспимо
-    // трохи», а дочекаємось: фіксована пауза давала випадкові провали.
+    // Обкладинки вантажаться ліниво (IntersectionObserver) і читаються з
+    // файлу на кілька мегабайтів. Запас часу тут великий навмисно: профіль
+    // стирається перед кожним прогоном, і перший рендер після холодного
+    // старту не вкладався у 8 секунд — це давало провали на справній програмі.
     const cover = await until(`
       const im = document.querySelector('.row[data-path] .art');
       if (!im) return null;
       return im.src.startsWith('data:image') && im.src.length > 2000
-        ? true : null;`, 20, 400);
+        ? true : null;`, 40, 500);
     check("обкладинка витягнута з файлу", cover === true,
       cover ? "" : await evalJs(`
         const im = document.querySelector('.row[data-path] .art');
@@ -536,7 +555,7 @@ function connect(url) {
     check("обкладинка все ще всередині файлу", (await until(`
       const im = document.querySelector('.row[data-path] .art');
       if (!im) return null;
-      return im.src.startsWith('data:image') && im.src.length > 2000 ? true : null;`, 20, 400)) === true);
+      return im.src.startsWith('data:image') && im.src.length > 2000 ? true : null;`, 40, 500)) === true);
     await shot("теги-змінено");
 
     console.log("\n[11b] Прослуховування прямо з пошуку");
@@ -796,6 +815,14 @@ function connect(url) {
     // Discord справді запущено, канал знайдено, кадр прийнято — і клієнт
     // чесно відповів, що такого додатка немає. Це і є доказ роботи протоколу.
     check("хибний ID чесно відхиляється", /Application ID/.test(dmsg || ""), dmsg || "мовчить");
+    // Прибираємо вигаданий ID одразу: він перекриває вшитий у програму, і
+    // саме через нього інтеграція колись «зламалась» уже поза тестом.
+    await evalJs(`
+      document.querySelector('#discordId').value = '';
+      document.querySelector('#discordId').dispatchEvent(new Event('input', {bubbles:true}));
+      return true;`);
+    check("вигаданий ID не лишився в налаштуваннях",
+      (await evalJs("return (await window.api.getSettings()).discordAppId")) === "");
 
     // Головне для роздачі друзям: людина нічого не вводила — має працювати
     // вшитий у програму ID, а не вискочити помилка формату.
@@ -827,10 +854,10 @@ function connect(url) {
     check("статус доїжджає до Discord", (await until(`
       return (await window.api.discordStatus()).connected ? true : null;`, 15, 400)) === true);
 
-    await evalJs(`
-      await window.api.discordActivity(null);
-      await window.api.setSettings({ discordEnabled: false });
-      return true;`);
+    // Знімаємо статус, але галочку НЕ вимикаємо: у власному профілі це вже
+    // нікому не зашкодить, а лишати систему в іншому стані, ніж застали, —
+    // погана звичка, з якої і виріс баг.
+    await evalJs(`await window.api.discordActivity(null); return true;`);
 
     // Обкладинка для Discord: вшиту в файл (data:) він не бере, тому шлях до
     // прев'ю виводиться з посилання, що yt-dlp лишає в тегах.
