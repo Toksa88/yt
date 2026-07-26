@@ -37,6 +37,20 @@ contextBridge.exposeInMainWorld("api", {
 
   onClipboardLink: (cb) => ipcRenderer.on("clipboard:link", (_e, url) => cb(url)),
 
+  streamUrl: (url) => call("stream:url", url),
+
+  plList: () => call("pl:list"),
+  plCreate: (name) => call("pl:create", name),
+  plRename: (id, name) => call("pl:rename", id, name),
+  plRemove: (id) => call("pl:remove", id),
+  plAdd: (id, paths) => call("pl:add", id, paths),
+  plRemoveTrack: (id, path) => call("pl:removeTrack", id, path),
+
+  discordConnect: (appId) => call("discord:connect", appId),
+  discordDisconnect: () => call("discord:disconnect"),
+  discordStatus: () => call("discord:status"),
+  discordActivity: (track) => call("discord:activity", track),
+
   getSettings: () => call("settings:get"),
   setSettings: (patch) => call("settings:set", patch),
 

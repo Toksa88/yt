@@ -15,6 +15,11 @@ const DEFAULTS = {
   sources: ["ytmusic", "soundcloud", "itunes", "musicbrainz"],
   watchClipboard: true,
   volume: 0.8,
+  // Альбом кладеться в окрему теку — інакше десяток треків тоне в колекції.
+  albumFolder: true,
+  // Discord показує назву ЗАРЕЄСТРОВАНОГО додатка, тому ID мусить бути свій.
+  discordEnabled: false,
+  discordAppId: "",
 };
 
 let cache = null;

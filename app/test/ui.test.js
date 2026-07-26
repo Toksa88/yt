@@ -135,7 +135,15 @@ function connect(url) {
           && b.backgroundImage.includes('gradient')
           && tab.borderBottomColor === 'rgb(124, 92, 255)';`)) === true);
     check("місток api доступний", (await evalJs("return typeof window.api?.search")) === "function");
-    check("ліва панель має 4 розділи", (await evalJs("return document.querySelectorAll('.navbtn').length")) === 4);
+    check("ліва панель має 5 розділів", (await evalJs("return document.querySelectorAll('.navbtn').length")) === 5);
+    // Підказка про буфер обміну має стояти НАД рядком пошуку, а не в кутку.
+    check("підказка розташована вище пошуку", (await evalJs(`
+      const t = document.querySelector('#toast');
+      const f = document.querySelector('#searchForm');
+      t.hidden = false;
+      const a = t.getBoundingClientRect(), b = f.getBoundingClientRect();
+      t.hidden = true;
+      return a.bottom <= b.top + 1 && a.width > 200;`)) === true);
     check("плеєр на місці й неактивний", (await evalJs(`
       return document.querySelector('#player').classList.contains('idle')
           && document.querySelector('#plPlay').disabled;`)) === true);
@@ -394,6 +402,95 @@ function connect(url) {
       const im = document.querySelector('.row[data-path] .art');
       return im && im.src.startsWith('data:image') && im.src.length > 2000;`)) === true);
     await shot("теги-змінено");
+
+    console.log("\n[11b] Прослуховування прямо з пошуку");
+    await evalJs(`
+      document.querySelector('.navbtn[data-page=search]').click();
+      document.querySelector('#q').value = 'Kevin MacLeod Cipher';
+      document.querySelector('#searchForm').dispatchEvent(new Event('submit', {cancelable:true}));
+      return true;`);
+    await until(`
+      if (document.querySelector('.spinner')) return null;
+      return document.querySelector('.row [data-act=listen]') ? true : null;`, 40, 1000);
+    await evalJs(`document.querySelector('.row [data-act=listen]').click(); return true`);
+    const preview = await until(`
+      const a = document.querySelector('#audio');
+      return (!a.paused && a.currentTime > 0.2)
+        ? { src: a.src.slice(0, 34), t: a.currentTime, q: state.pq.list.length } : null;`, 40, 700);
+    check("трек із пошуку грає без завантаження", Boolean(preview),
+      preview ? `${preview.t.toFixed(1)}с, джерело ${preview.src}…` : "не заграв");
+    check("це справді потік із мережі", preview?.src?.startsWith("https://") === true, preview?.src || "");
+    check("черга зібралась зі списку результатів", preview?.q > 1, `${preview?.q} треків`);
+    check("кнопка «наступний» активна", (await evalJs("return !document.querySelector('#plNext').disabled")) === true);
+    await shot("прослуховування-з-пошуку");
+    await evalJs(`document.querySelector('#plPlay').click(); return true`);
+
+    console.log("\n[11c] Плейлисти");
+    // Плейлисти лежать у справжніх даних користувача, тому прибираємо за
+    // собою: інакше кожен запуск лишав би сміття і ламав наступний.
+    const PL_NAME = `Тест ${Date.now()}`;
+    await evalJs(`
+      for (const p of await window.api.plList()) {
+        if (/^(Тест |Мій тест)/.test(p.name)) await window.api.plRemove(p.id);
+      }
+      state.playlists = await window.api.plList();
+      return true;`);
+
+    await evalJs(`document.querySelector('.navbtn[data-page=library]').click(); return true`);
+    await until(`return document.querySelector('.row[data-path]') ? true : null`, 20, 400);
+    await evalJs(`document.querySelector('.row[data-path] input[data-lact=pick]').click(); return true`);
+    check("кнопка «У плейлист» з'явилась", (await evalJs("return !document.querySelector('#selPl').hidden")) === true);
+    await evalJs(`document.querySelector('#selPl').click(); return true`);
+    await sleep(300);
+    check("вікно вибору плейлиста відкрилось", (await evalJs("return !document.querySelector('#plModal').hidden")) === true);
+    await evalJs(`
+      document.querySelector('#plNewName').value = ${JSON.stringify(PL_NAME)};
+      document.querySelector('#plCreateAdd').click();
+      return true;`);
+    const made = await until(`
+      if (!document.querySelector('#plModal').hidden) return null;
+      const p = state.playlists.find(p => p.name === ${JSON.stringify(PL_NAME)});
+      return p ? { name: p.name, tracks: p.tracks.length } : null;`, 20, 400);
+    check("плейлист створено з треком", made?.tracks === 1, made ? `«${made.name}»` : "не створився");
+
+    await evalJs(`document.querySelector('.navbtn[data-page=playlists]').click(); return true`);
+    const plPage = await until(`
+      const c = [...document.querySelectorAll('.plcard')]
+        .find(c => c.textContent.includes(${JSON.stringify(PL_NAME)}));
+      return c ? { text: c.textContent.replace(/\\s+/g,' ').trim() } : null;`, 20, 400);
+    check("сторінка плейлистів показує його", Boolean(plPage), (plPage?.text || "").slice(0, 46));
+
+    await evalJs(`
+      [...document.querySelectorAll('.plcard')]
+        .find(c => c.textContent.includes(${JSON.stringify(PL_NAME)}))
+        .querySelector('[data-plact=open]').click();
+      return true;`);
+    await sleep(400);
+    check("всередині плейлиста видно трек",
+      (await evalJs("return document.querySelectorAll('.row[data-path]').length")) === 1);
+    await shot("плейлист");
+
+    const left = await evalJs(`
+      for (const p of await window.api.plList()) {
+        if (p.name === ${JSON.stringify(PL_NAME)}) await window.api.plRemove(p.id);
+      }
+      return (await window.api.plList()).filter(p => p.name === ${JSON.stringify(PL_NAME)}).length;`);
+    check("тест прибрав за собою", left === 0);
+
+    console.log("\n[11d] Discord");
+    await evalJs(`document.querySelector('.navbtn[data-page=settings]').click(); return true`);
+    await sleep(500);
+    await evalJs(`
+      document.querySelector('#discordId').value = '1234567890123456789';
+      document.querySelector('#discordId').dispatchEvent(new Event('input', {bubbles:true}));
+      document.querySelector('#discordTest').click();
+      return true;`);
+    const dmsg = await until(`
+      const t = document.querySelector('#discordMsg').textContent;
+      return (t && t !== 'Підключаюсь…') ? t : null;`, 20, 500);
+    // Discord справді запущено, канал знайдено, кадр прийнято — і клієнт
+    // чесно відповів, що такого додатка немає. Це і є доказ роботи протоколу.
+    check("Discord відповідає на наш запит", /Application ID/.test(dmsg || ""), dmsg || "мовчить");
 
     console.log("\n[12] Налаштування");
     await evalJs(`document.querySelector('.navbtn[data-page=settings]').click(); return true`);

@@ -62,6 +62,34 @@ console.log("\n[1b] Розпізнавання тимчасових збоїв")
   for (const m of permanent) check("постійна: " + m.slice(7, 46), !TRANSIENT.test(m));
 }
 
+// --- 1c. окрема тека для альбому та вибір формату ---
+console.log("\n[1c] Складання аргументів yt-dlp");
+{
+  const base = { url: "u", outDir: "D:\\out", tempDir: "D:\\tmp", format: "m4a" };
+  const tmpl = (job) => {
+    const a = buildArgs(job);
+    return a[a.indexOf("-o") + 1];
+  };
+
+  check("одиночний трек — без теки", tmpl({ ...base, isPlaylist: false, albumFolder: true })
+    === "%(artists.0,artist,uploader)s - %(track,title)s.%(ext)s");
+  check("альбом — у власну теку", tmpl({ ...base, isPlaylist: true, albumFolder: true })
+    === "%(album,playlist_title,playlist,uploader)s/%(artists.0,artist,uploader)s - %(track,title)s.%(ext)s");
+  check("вимкнена настройка поважається", tmpl({ ...base, isPlaylist: true, albumFolder: false })
+    === "%(artists.0,artist,uploader)s - %(track,title)s.%(ext)s");
+
+  const has = (job, ...want) => {
+    const a = buildArgs(job).join(" ");
+    return want.every((w) => a.includes(w));
+  };
+  check("m4a просить саме m4a-потік", has({ ...base, format: "m4a" }, "bestaudio[ext=m4a]", "--audio-format m4a"));
+  check("opus бере найкращий потік", has({ ...base, format: "opus" }, "-f bestaudio/best", "--audio-format opus"));
+  check("mp3 задає 320K", has({ ...base, format: "mp3" }, "--audio-format mp3", "--audio-quality 320K"));
+  // Один трек з YouTube може висіти в «радіо»-плейлисті на сотні відео.
+  check("для одного треку стоїть --no-playlist", has({ ...base, isPlaylist: false }, "--no-playlist"));
+  check("для альбому --no-playlist немає", !has({ ...base, isPlaylist: true }, "--no-playlist"));
+}
+
 // --- 2. бінарники ---
 console.log("\n[2] Зовнішні програми");
 const st = binaries.status();

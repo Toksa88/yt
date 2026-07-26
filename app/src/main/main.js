@@ -9,6 +9,11 @@ const downloads = require("./download");
 const settings = require("./settings");
 const library = require("./library");
 const tags = require("./tags");
+const stream = require("./stream");
+const playlists = require("./playlists");
+const { Discord } = require("./discord");
+
+const discord = new Discord();
 
 let win = null;
 
@@ -139,6 +144,7 @@ handle("dl:add", (items, opts) => {
   return downloads.add(items, {
     outDir: opts?.outDir || s.outDir,
     format: opts?.format || s.format,
+    albumFolder: opts?.albumFolder ?? s.albumFolder,
   });
 });
 handle("dl:cancel", (id) => downloads.cancel(id));
@@ -179,6 +185,9 @@ handle("lib:tags", async (items, patch) => {
       const r = await tags.write(it.path, own);
       library.forget(it.path);
       library.forget(r.path);
+      // Плейлист посилається на шлях, тож після перейменування його треба
+      // полагодити — інакше трек тихо зникне зі списку.
+      if (r.renamed) playlists.repath(it.path, r.path);
       results.push({ file: it.path, ok: true, path: r.path, renamed: r.renamed });
     } catch (e) {
       // Один заблокований файл не має зривати правку решти — але й мовчати
@@ -196,6 +205,36 @@ handle("lib:trash", async (file) => {
   await shell.trashItem(file);
   library.forget(file);
   return true;
+});
+
+handle("stream:url", (url) => stream.resolve(url));
+
+handle("pl:list", () => playlists.load());
+handle("pl:create", (name) => playlists.create(name));
+handle("pl:rename", (id, name) => playlists.rename(id, name));
+handle("pl:remove", (id) => playlists.remove(id));
+handle("pl:add", (id, paths) => playlists.addTracks(id, paths));
+handle("pl:removeTrack", (id, path) => playlists.removeTrack(id, path));
+
+handle("discord:connect", async (appId) => {
+  await discord.connect(appId);
+  return true;
+});
+handle("discord:disconnect", () => {
+  discord.setActivity(null);
+  discord.disconnect();
+  return true;
+});
+handle("discord:status", () => ({ connected: discord.connected }));
+handle("discord:activity", (track) => {
+  const s = settings.load();
+  if (!s.discordEnabled) return false;
+  // Підключаємось ліниво: якщо Discord запустили вже після нашої програми,
+  // перше ж відтворення саме встановить з'єднання.
+  if (!discord.connected && s.discordAppId) {
+    discord.connect(s.discordAppId).catch(() => {});
+  }
+  return discord.setActivity(track);
 });
 
 handle("shell:reveal", (file) => {

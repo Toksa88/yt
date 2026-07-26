@@ -313,6 +313,7 @@ function add(items, opts) {
       isPlaylist: it.kind === "album" || Boolean(it.isPlaylist),
       outDir: opts.outDir,
       tempDir: path.join(TEMP_ROOT, `j${seq}`),
+      albumFolder: opts.albumFolder !== false,
       attempt: 0,
       format: ["m4a", "mp3", "opus"].includes(opts.format) ? opts.format : "m4a",
       status: "queued",

@@ -19,6 +19,11 @@ const state = {
   library: { dir: "", tracks: [], missing: false, loaded: false, loading: false },
   /** шляхи файлів, обраних у Сховищі для правки тегів */
   libPicked: new Set(),
+  playlists: [],
+  /** відкритий плейлист або null */
+  openPl: null,
+  /** черга відтворення: список треків і місце в ньому */
+  pq: { list: [], i: -1 },
   /** ключі «виконавець|назва» того, що вже лежить на диску */
   owned: new Set(),
   playing: null,
@@ -187,6 +192,7 @@ function songRow(s) {
       <div class="alb">${esc(s.album || "")}</div>
       <div class="dur">${dur(s.duration)}</div>
       <div class="act">
+        ${dead ? "" : `<button data-act="listen" class="ghost" title="Послухати не завантажуючи">▶</button>`}
         ${dead ? "" : `<button data-act="dl-one" class="primary">ЗАБИРАЮ!</button>`}
       </div>
     </div>`;
@@ -486,6 +492,116 @@ async function loadLibrary(force = false) {
   }
 }
 
+// ------------------------------------------------------------------ сторінка «Плейлисти»
+
+/** Плейлист зберігає шляхи; самі треки беремо зі Сховища. */
+function plTracks(pl) {
+  return (pl?.tracks || [])
+    .map((p) => state.library.tracks.find((t) => t.path === p))
+    .filter(Boolean);
+}
+
+function renderPlaylists() {
+  $("#tabs").hidden = true;
+
+  if (state.openPl) {
+    const pl = state.playlists.find((p) => p.id === state.openPl);
+    if (!pl) {
+      state.openPl = null;
+      return renderPlaylists();
+    }
+    const tracks = plTracks(pl);
+    const lost = pl.tracks.length - tracks.length;
+
+    mainEl.innerHTML = `
+      <button class="ghost back" data-plact="back">← Усі плейлисти</button>
+      <div class="libhead">
+        <h1>${esc(pl.name)}</h1>
+        <span class="grow"></span>
+        <button class="primary" data-plact="playall" ${tracks.length ? "" : "disabled"}>▶ Слухати все</button>
+        <button class="ghost" data-plact="rename" data-id="${esc(pl.id)}">Перейменувати</button>
+        <button class="ghost danger" data-plact="delete" data-id="${esc(pl.id)}">Видалити</button>
+      </div>
+      <div class="note">${plural(tracks.length, TRACKS)}${
+        lost ? ` · ${plural(lost, ["файл не знайдено", "файли не знайдено", "файлів не знайдено"])}` : ""
+      }</div>
+      ${
+        tracks.length
+          ? `<div class="rows">${tracks.map((t) => plTrackRow(t, pl.id)).join("")}</div>`
+          : `<div class="note">Порожньо. Вибери треки у Сховищі й тисни «У плейлист».</div>`
+      }`;
+    loadCovers();
+    return;
+  }
+
+  mainEl.innerHTML = `
+    <div class="libhead">
+      <h1>Плейлисти</h1>
+      <span class="grow"></span>
+      <button class="primary" data-plact="new">Створити плейлист</button>
+    </div>
+    ${
+      state.playlists.length
+        ? state.playlists
+            .map(
+              (p) => `
+      <div class="plcard">
+        <div class="pic">☰</div>
+        <div class="who" data-plact="open" data-id="${esc(p.id)}">
+          <b>${esc(p.name)}</b>
+          <small>${plural(p.tracks.length, TRACKS)}</small>
+        </div>
+        <div class="pact">
+          <button class="primary" data-plact="playpl" data-id="${esc(p.id)}" ${p.tracks.length ? "" : "disabled"}>▶</button>
+          <button class="ghost" data-plact="rename" data-id="${esc(p.id)}">Перейменувати</button>
+          <button class="ghost danger" data-plact="delete" data-id="${esc(p.id)}">Видалити</button>
+        </div>
+      </div>`,
+            )
+            .join("")
+        : `<div class="note">Плейлистів ще немає. Створи перший — або вибери треки у Сховищі й тисни «У плейлист».</div>`
+    }`;
+}
+
+function plTrackRow(t, plId) {
+  const isPlaying = state.playing?.path === t.path;
+  return `
+    <div class="row${isPlaying ? " playing" : ""}" data-path="${esc(t.path)}">
+      <span></span>
+      ${img(null, "art", `data-cover="${esc(t.path)}"`)}
+      <div class="name">
+        <b>${esc(t.title)}</b>
+        <span class="sub">${esc(t.artist || "невідомий виконавець")}</span>
+      </div>
+      <div class="alb">${esc(t.album || "")}</div>
+      <div class="dur">${dur(t.duration)}</div>
+      <div class="act">
+        <button data-lact="play" class="primary">${isPlaying && !audio.paused ? "❚❚" : "▶"}</button>
+        <button data-plact="drop" data-id="${esc(plId)}" class="ghost">Прибрати</button>
+      </div>
+    </div>`;
+}
+
+async function loadPlaylists() {
+  state.playlists = await window.api.plList();
+}
+
+function openPlModal(paths) {
+  if (!paths.length) return;
+  $("#plModalCount").textContent = `Обрано ${plural(paths.length, TRACKS)}`;
+  $("#plModalList").innerHTML = state.playlists.length
+    ? state.playlists
+        .map(
+          (p) => `<div class="plrow" data-pladd="${esc(p.id)}">
+            <b>${esc(p.name)}</b><small>${plural(p.tracks.length, TRACKS)}</small></div>`,
+        )
+        .join("")
+    : `<div class="mnote">Плейлистів ще немає — створи нижче.</div>`;
+  $("#plNewName").value = "";
+  $("#plModal").hidden = false;
+  $("#plModal").dataset.paths = JSON.stringify(paths);
+}
+
 // ------------------------------------------------------------------ сторінка «Налаштування»
 
 function renderSettings() {
@@ -523,6 +639,41 @@ function renderSettings() {
             <option value="mp3"${s.format === "mp3" ? " selected" : ""}>MP3 320 — для старої техніки</option>
           </select>
         </div>
+      </div>
+
+      <div class="set">
+        <h4>Окрема тека для альбому</h4>
+        <p>Коли завантажуєш цілий альбом, його треки складаються у власну теку з назвою альбому.</p>
+        <div class="ctl">
+          <label class="switch">
+            <input type="checkbox" id="albumFolder" ${s.albumFolder ? "checked" : ""} />
+            Класти альбом в окрему теку
+          </label>
+        </div>
+      </div>
+
+      <div class="set">
+        <h4>Показувати в Discord, що слухаєш</h4>
+        <p>
+          Discord показує назву <b>зареєстрованого додатка</b>, а не заголовок нашого вікна,
+          тому потрібен власний ID. Це безкоштовно й на дві хвилини:
+          відкрий <b>discord.com/developers/applications</b> → <b>New Application</b> →
+          назви його як хочеш (саме цю назву й побачать друзі) → на вкладці
+          <b>General Information</b> скопіюй <b>Application ID</b> і встав сюди.
+          Discord має бути запущений.
+        </p>
+        <div class="ctl">
+          <label class="switch">
+            <input type="checkbox" id="discordOn" ${s.discordEnabled ? "checked" : ""} />
+            Увімкнути
+          </label>
+        </div>
+        <div class="ctl spaced">
+          <input type="text" id="discordId" class="wide" placeholder="Application ID (18–19 цифр)"
+                 value="${esc(s.discordAppId || "")}" spellcheck="false" />
+          <button class="ghost" id="discordTest">Перевірити</button>
+        </div>
+        <div class="mnote" id="discordMsg"></div>
       </div>
 
       <div class="set">
@@ -579,6 +730,7 @@ function render() {
 
   if (state.page === "queue") renderQueue();
   else if (state.page === "library") renderLibrary();
+  else if (state.page === "playlists") renderPlaylists();
   else if (state.page === "settings") renderSettings();
   else {
     const v = state.view;
@@ -603,6 +755,12 @@ function render() {
 function goto(page) {
   state.page = page;
   if (page === "library") loadLibrary();
+  if (page === "playlists") {
+    state.openPl = null;
+    // Плейлисти показують треки зі Сховища, тож воно має бути прочитане.
+    loadLibrary();
+    loadPlaylists().then(render);
+  }
   render();
   if (page === "search") $("#q").focus();
 }
@@ -614,6 +772,7 @@ function refreshSelbar() {
   $("#selCount").textContent = `${n} вибрано`;
   $("#selDl").hidden = isLib;
   $("#selTags").hidden = !isLib;
+  $("#selPl").hidden = !isLib;
 }
 
 // ------------------------------------------------------------------ пошук
@@ -852,26 +1011,98 @@ async function saveTags() {
 
 // ------------------------------------------------------------------ плеєр
 
-function play(track) {
-  const same = state.playing?.path === track.path;
+/** Один ключ і для локального файлу, і для треку з пошуку. */
+const trackKey = (t) => (t ? t.path || t.url : null);
+
+/**
+ * @param {object} track локальний файл ({path}) або результат пошуку ({url})
+ * @param {object[]} [list] черга, у якій цей трек стоїть (для ⏭ і ⏮)
+ */
+async function play(track, list) {
+  if (!track) return;
+  const same = trackKey(state.playing) === trackKey(track);
+
   if (same && !audio.paused) {
     audio.pause();
     return;
   }
-  if (!same) {
-    state.playing = track;
-    audio.src = fileUrl(track.path);
-    $("#plTitle").textContent = track.title;
-    $("#plArtist").textContent = track.artist || "невідомий виконавець";
-    $("#plArt").src = BLANK;
-    window.api.libCover(track.path).then((u) => {
-      if (u && state.playing?.path === track.path) $("#plArt").src = u;
-    });
-    $("#player").classList.remove("idle");
-    $("#plPlay").disabled = false;
-    $("#plSeek").disabled = false;
+  if (same && audio.src) {
+    audio.play().catch(() => {});
+    return;
   }
+
+  if (list) {
+    state.pq.list = list;
+    state.pq.i = list.findIndex((t) => trackKey(t) === trackKey(track));
+  } else if (state.pq.list.every((t) => trackKey(t) !== trackKey(track))) {
+    state.pq = { list: [track], i: 0 };
+  } else {
+    state.pq.i = state.pq.list.findIndex((t) => trackKey(t) === trackKey(track));
+  }
+
+  state.playing = track;
+  $("#plTitle").textContent = track.title;
+  $("#plArtist").textContent = track.artist || "невідомий виконавець";
+  $("#plArt").src = track.thumb || BLANK;
+  $("#player").classList.remove("idle");
+  $("#plPlay").disabled = false;
+  $("#plSeek").disabled = false;
+  syncNavBtns();
+
+  if (track.path) {
+    audio.src = fileUrl(track.path);
+    window.api.libCover(track.path).then((u) => {
+      if (u && trackKey(state.playing) === trackKey(track)) $("#plArt").src = u;
+    });
+  } else {
+    // Трек із пошуку: справжнє посилання на звук треба спершу отримати,
+    // і це кілька секунд — тому одразу кажемо, що працюємо.
+    $("#plArtist").textContent = "готую потік…";
+    try {
+      const url = await window.api.streamUrl(track.url);
+      if (trackKey(state.playing) !== trackKey(track)) return; // встигли перемкнути
+      audio.src = url;
+      $("#plArtist").textContent = track.artist || "невідомий виконавець";
+    } catch (e) {
+      if (trackKey(state.playing) !== trackKey(track)) return;
+      $("#plArtist").textContent = track.artist || "";
+      toast("Не вдалося отримати потік: " + e.message);
+      return;
+    }
+  }
+
   audio.play().catch((e) => toast("Не вдалося відтворити: " + e.message));
+}
+
+function playAt(i) {
+  const t = state.pq.list[i];
+  if (!t) return;
+  state.pq.i = i;
+  play(t);
+}
+
+function syncNavBtns() {
+  const { list, i } = state.pq;
+  $("#plPrev").disabled = !(i > 0);
+  $("#plNext").disabled = !(i >= 0 && i < list.length - 1);
+}
+
+/** Те, що зараз грає, — у статус Discord. */
+function pushDiscord() {
+  const t = state.playing;
+  if (!t) return window.api.discordActivity(null).catch(() => {});
+  return window.api
+    .discordActivity({
+      title: t.title,
+      artist: t.artist,
+      album: t.album,
+      // Обкладинку з тегів (data:) Discord не візьме — лише звичайне посилання.
+      image: /^https?:/.test(t.thumb || "") ? t.thumb : null,
+      duration: Number.isFinite(audio.duration) ? audio.duration : 0,
+      position: audio.currentTime,
+      paused: audio.paused,
+    })
+    .catch(() => {});
 }
 
 /** Повністю відпускає файл: інакше Windows не дасть його перейменувати. */
@@ -880,6 +1111,8 @@ function stopPlayback() {
   audio.removeAttribute("src");
   audio.load();
   state.playing = null;
+  state.pq = { list: [], i: -1 };
+  window.api.discordActivity(null).catch(() => {});
   $("#player").classList.add("idle");
   $("#plPlay").disabled = true;
   $("#plSeek").disabled = true;
@@ -890,21 +1123,33 @@ function stopPlayback() {
 
 function syncPlayBtn() {
   $("#plPlay").textContent = audio.paused ? "▶" : "❚❚";
-  if (state.page === "library") {
-    mainEl.querySelectorAll(".row[data-path]").forEach((r) => {
-      const on = r.dataset.path === state.playing?.path;
-      r.classList.toggle("playing", on);
-      const b = r.querySelector('[data-lact="play"]');
-      if (b) b.textContent = on && !audio.paused ? "❚❚" : "▶";
-    });
-  }
+  syncNavBtns();
+  mainEl.querySelectorAll(".row[data-path]").forEach((r) => {
+    const on = r.dataset.path === state.playing?.path;
+    r.classList.toggle("playing", on);
+    const b = r.querySelector('[data-lact="play"]');
+    if (b) b.textContent = on && !audio.paused ? "❚❚" : "▶";
+  });
+  mainEl.querySelectorAll(".row[data-key]").forEach((r) => {
+    const it = index.get(r.dataset.key);
+    const on = it && trackKey(it) === trackKey(state.playing);
+    r.classList.toggle("playing", Boolean(on));
+    const b = r.querySelector('[data-act="listen"]');
+    if (b) b.textContent = on && !audio.paused ? "❚❚" : "▶";
+  });
+  pushDiscord();
 }
 
 audio.addEventListener("play", syncPlayBtn);
 audio.addEventListener("pause", syncPlayBtn);
-audio.addEventListener("ended", syncPlayBtn);
+audio.addEventListener("ended", () => {
+  syncPlayBtn();
+  // Далі за чергою; якщо це був останній трек — просто зупиняємось.
+  if (state.pq.i >= 0 && state.pq.i < state.pq.list.length - 1) playAt(state.pq.i + 1);
+});
 audio.addEventListener("loadedmetadata", () => {
   $("#plEnd").textContent = dur(audio.duration);
+  pushDiscord();
 });
 audio.addEventListener("timeupdate", () => {
   $("#plNow").textContent = dur(audio.currentTime);
@@ -915,6 +1160,8 @@ audio.addEventListener("error", () => {
 });
 
 $("#plPlay").addEventListener("click", () => (audio.paused ? audio.play() : audio.pause()));
+$("#plPrev").addEventListener("click", () => playAt(state.pq.i - 1));
+$("#plNext").addEventListener("click", () => playAt(state.pq.i + 1));
 $("#plSeek").addEventListener("input", () => {
   if (audio.duration) audio.currentTime = (Number($("#plSeek").value) / 1000) * audio.duration;
 });
@@ -946,6 +1193,12 @@ mainEl.addEventListener("click", (e) => {
     const act = btn.dataset.act;
     const rowKey = btn.closest("[data-key]")?.dataset.key;
     if (act === "pick") return togglePick(rowKey, btn.checked);
+    if (act === "listen") {
+      // Слухаємо прямо з результатів пошуку, нічого не завантажуючи.
+      const it = index.get(rowKey);
+      const queue = (state.results[state.tab] || []).filter((s) => s.kind === "song" && s.url);
+      return play(it, queue.length ? queue : undefined);
+    }
     if (act === "dl-one") return enqueue([index.get(rowKey)]);
     if (act === "dl-album") return enqueue([index.get(btn.dataset.key)]);
     if (act === "open-album") return openAlbum(index.get(btn.dataset.key));
@@ -980,7 +1233,11 @@ mainEl.addEventListener("click", (e) => {
       return;
     }
     if (lb.dataset.lact === "tags") return openTagEditor([p]);
-    if (lb.dataset.lact === "play") return play(track);
+    if (lb.dataset.lact === "play") {
+      // Черга — увесь видимий список, щоб працювали ⏭ і автоперехід.
+      const pl = state.openPl ? state.playlists.find((x) => x.id === state.openPl) : null;
+      return play(track, pl ? plTracks(pl) : state.library.tracks);
+    }
     if (lb.dataset.lact === "reveal") return window.api.reveal(p);
     if (lb.dataset.lact === "trash") {
       if (!confirm(`Перемістити «${track.title}» у кошик?`)) return;
@@ -1003,6 +1260,60 @@ mainEl.addEventListener("click", (e) => {
     if (jb.dataset.jact === "reveal" && job?.files[0]) return window.api.reveal(job.files[0]);
   }
 
+  // --- плейлисти ---
+  const pb = e.target.closest("[data-plact]");
+  if (pb) {
+    const act = pb.dataset.plact;
+    const id = pb.dataset.id;
+    if (act === "back") {
+      state.openPl = null;
+      return render();
+    }
+    if (act === "open") {
+      state.openPl = id;
+      return render();
+    }
+    if (act === "new") {
+      const name = prompt("Назва нового плейлиста:");
+      if (!name?.trim()) return;
+      return window.api.plCreate(name).then((list) => {
+        state.playlists = list;
+        render();
+      });
+    }
+    if (act === "rename") {
+      const cur = state.playlists.find((p) => p.id === id);
+      const name = prompt("Нова назва:", cur?.name || "");
+      if (!name?.trim()) return;
+      return window.api.plRename(id, name).then((list) => {
+        state.playlists = list;
+        render();
+      });
+    }
+    if (act === "delete") {
+      const cur = state.playlists.find((p) => p.id === id);
+      if (!confirm(`Видалити плейлист «${cur?.name}»? Самі файли лишаться на диску.`)) return;
+      return window.api.plRemove(id).then((list) => {
+        state.playlists = list;
+        state.openPl = null;
+        render();
+      });
+    }
+    if (act === "drop") {
+      const p = pb.closest("[data-path]")?.dataset.path;
+      return window.api.plRemoveTrack(id, p).then((list) => {
+        state.playlists = list;
+        render();
+      });
+    }
+    if (act === "playall" || act === "playpl") {
+      const pl = state.playlists.find((p) => p.id === (id || state.openPl));
+      const list = plTracks(pl);
+      if (list.length) play(list[0], list);
+      return;
+    }
+  }
+
   if (e.target.id === "qOpen" || e.target.id === "libOpen")
     return window.api.openFolder(state.settings.outDir);
   if (e.target.id === "qClear")
@@ -1015,12 +1326,14 @@ mainEl.addEventListener("click", (e) => {
   if (e.target.id === "folderBtn" || e.target.closest("#folderBtn")) return chooseFolder();
 
   // --- клік по рядку треку вмикає галочку, по рядку Сховища — програвання ---
-  if (btn || lb || jb) return;
+  if (btn || lb || jb || pb) return;
   const row = e.target.closest(".row");
   if (!row) return;
   if (row.dataset.path) {
     const track = state.library.tracks.find((t) => t.path === row.dataset.path);
-    if (track) play(track);
+    if (!track) return;
+    const pl = state.openPl ? state.playlists.find((x) => x.id === state.openPl) : null;
+    play(track, pl ? plTracks(pl) : state.library.tracks);
     return;
   }
   const cb = row.querySelector('input[data-act="pick"]');
@@ -1037,6 +1350,43 @@ mainEl.addEventListener("change", (e) => {
   if (e.target.id === "clipToggle") {
     state.settings.watchClipboard = e.target.checked;
     window.api.setSettings({ watchClipboard: e.target.checked });
+  }
+  if (e.target.id === "albumFolder") {
+    state.settings.albumFolder = e.target.checked;
+    window.api.setSettings({ albumFolder: e.target.checked });
+  }
+  if (e.target.id === "discordOn") {
+    state.settings.discordEnabled = e.target.checked;
+    window.api.setSettings({ discordEnabled: e.target.checked });
+    if (!e.target.checked) window.api.discordDisconnect().catch(() => {});
+    else if (state.settings.discordAppId) pushDiscord();
+  }
+});
+
+mainEl.addEventListener("input", (e) => {
+  if (e.target.id === "discordId") {
+    state.settings.discordAppId = e.target.value.trim();
+    window.api.setSettings({ discordAppId: state.settings.discordAppId });
+  }
+});
+
+mainEl.addEventListener("click", async (e) => {
+  if (e.target.id !== "discordTest") return;
+  const msg = $("#discordMsg");
+  const id = $("#discordId").value.trim();
+  msg.className = "mnote";
+  msg.textContent = "Підключаюсь…";
+  try {
+    await window.api.discordConnect(id);
+    msg.className = "mnote";
+    msg.textContent = "Підключено. Статус з'явиться, щойно щось заграє.";
+    if (state.playing) pushDiscord();
+  } catch (err) {
+    msg.className = "mnote err";
+    msg.textContent =
+      err.message === "Invalid Client ID"
+        ? "Discord не знає такого додатка — перевір Application ID."
+        : "Не вийшло: " + err.message;
   }
 });
 
@@ -1059,6 +1409,30 @@ $("#selNone").addEventListener("click", () => {
 });
 
 $("#selTags").addEventListener("click", () => openTagEditor([...state.libPicked]));
+$("#selPl").addEventListener("click", () => openPlModal([...state.libPicked]));
+
+$("#plCancel").addEventListener("click", () => ($("#plModal").hidden = true));
+$("#plModal").addEventListener("click", async (e) => {
+  if (e.target.id === "plModal") return ($("#plModal").hidden = true);
+  const row = e.target.closest("[data-pladd]");
+  if (!row) return;
+  const paths = JSON.parse($("#plModal").dataset.paths || "[]");
+  state.playlists = await window.api.plAdd(row.dataset.pladd, paths);
+  $("#plModal").hidden = true;
+  toast(`Додано в плейлист: ${plural(paths.length, TRACKS)}`, [], 3500);
+});
+$("#plCreateAdd").addEventListener("click", async () => {
+  const name = $("#plNewName").value.trim();
+  if (!name) {
+    $("#plNewName").focus();
+    return;
+  }
+  const paths = JSON.parse($("#plModal").dataset.paths || "[]");
+  const list = await window.api.plCreate(name);
+  state.playlists = await window.api.plAdd(list[0].id, paths);
+  $("#plModal").hidden = true;
+  toast(`Створено «${name}» — ${plural(paths.length, TRACKS)}`, [], 3500);
+});
 $("#tagCancel").addEventListener("click", () => ($("#tagModal").hidden = true));
 $("#tagSave").addEventListener("click", saveTags);
 $("#tagModal").addEventListener("click", (e) => {
@@ -1153,8 +1527,13 @@ window.api.onClipboardLink((url) => {
 
   state.jobs = new Map((await window.api.dlList()).map((j) => [j.id, j]));
   refreshQueueBadge();
+  await loadPlaylists();
   render();
   $("#q").focus();
+
+  if (s.discordEnabled && s.discordAppId) {
+    window.api.discordConnect(s.discordAppId).catch(() => {});
+  }
 
   // Сховище читаємо у фоні: воно потрібне ще й для позначки «вже є» в пошуку.
   loadLibrary();

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src https: data:; media-src file: data: blob:; font-src 'self';"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src https: data:; media-src https: file: data: blob:; font-src 'self';"
     />
     <title>Music Grabber</title>
     <link rel="stylesheet" href="style.css" />
@@ -24,6 +24,9 @@
         <button class="navbtn" data-page="library">
           <span class="nico">♬</span> Сховище
         </button>
+        <button class="navbtn" data-page="playlists">
+          <span class="nico">☰</span> Плейлисти
+        </button>
         <button class="navbtn" data-page="settings">
           <span class="nico">⚙</span> Налаштування
         </button>
@@ -36,6 +39,14 @@
 
       <!-- ---------------------------------------------- вміст -->
       <div class="content">
+        <!-- Підказка стоїть НАД рядком пошуку: саме туди дивишся, коли щойно
+             скопіював посилання, і саме там на неї треба реагувати. -->
+        <div class="toast" id="toast" hidden>
+          <span id="toastText"></span>
+          <span class="tacts" id="toastActs"></span>
+          <button class="tclose" id="toastClose">✕</button>
+        </div>
+
         <header class="topbar" id="topbar">
           <form class="searchbox" id="searchForm" autocomplete="off">
             <span class="sico">⌕</span>
@@ -77,7 +88,9 @@
         <b id="plTitle">Нічого не грає</b>
         <small id="plArtist">Натисни ▶ на треку у Сховищі</small>
       </div>
+      <button class="pbtn" id="plPrev" title="Попередній" disabled>⏮</button>
       <button class="pbtn big" id="plPlay" title="Грати / пауза" disabled>▶</button>
+      <button class="pbtn" id="plNext" title="Наступний" disabled>⏭</button>
       <div class="pseek">
         <input type="range" id="plSeek" min="0" max="1000" value="0" disabled />
         <span class="ptime"><span id="plNow">0:00</span> / <span id="plEnd">0:00</span></span>
@@ -92,7 +105,24 @@
       <span id="selCount">0 вибрано</span>
       <button id="selNone" class="ghost">Зняти вибір</button>
       <button id="selDl" class="primary">ЗАБИРАЮ!</button>
-      <button id="selTags" class="primary" hidden>Змінити теги</button>
+      <button id="selTags" class="ghost" hidden>Змінити теги</button>
+      <button id="selPl" class="primary" hidden>У плейлист</button>
+    </div>
+
+    <div class="modal" id="plModal" hidden>
+      <div class="mbox">
+        <h3>Додати в плейлист</h3>
+        <div class="mnote" id="plModalCount"></div>
+        <div id="plModalList" class="pllist"></div>
+        <label class="field">
+          <span>Або створити новий</span>
+          <input type="text" id="plNewName" placeholder="Назва плейлиста" spellcheck="false" />
+        </label>
+        <div class="mact">
+          <button class="ghost" id="plCancel">Скасувати</button>
+          <button class="primary" id="plCreateAdd">Створити й додати</button>
+        </div>
+      </div>
     </div>
 
     <div class="modal" id="tagModal" hidden>
@@ -121,12 +151,6 @@
           <button class="primary" id="tagSave">Зберегти</button>
         </div>
       </div>
-    </div>
-
-    <div class="toast" id="toast" hidden>
-      <span id="toastText"></span>
-      <span class="tacts" id="toastActs"></span>
-      <button class="tclose" id="toastClose">✕</button>
     </div>
 
     <script src="app.js"></script>
