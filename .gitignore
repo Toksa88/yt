@@ -14,23 +14,15 @@
 !docs/**/*.png
 !docs/**/*.jpg
 
-# --- Артефакти збірки PyInstaller ---
-build/
+# --- Артефакти збірки ---
 dist/
-*.spec
-
-# --- Node / Electron ---
-node_modules/
+build/
 # сюди кладуться вшиті yt-dlp.exe та ffmpeg.exe — це чужі бінарники, не наш код
 app/bin/
 
+# --- Node ---
+node_modules/
+npm-debug.log*
+
 # --- Особисті налаштування (свої шляхи в кожного) ---
 settings.json
-
-# --- Python ---
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
-env/
