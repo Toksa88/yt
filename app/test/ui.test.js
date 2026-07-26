@@ -565,6 +565,41 @@ function connect(url) {
     check("панель закривається", (await evalJs("return document.querySelector('#lyricsPanel').hidden")) === true);
     await evalJs(`document.querySelector('#audio').pause(); return true`);
 
+    console.log("\n[11b3] Улюблене, історія, пошук у Сховищі");
+    await evalJs(`document.querySelector('.navbtn[data-page=library]').click(); return true`);
+    await until(`return document.querySelector('.row[data-path]') ? true : null`, 20, 400);
+
+    const favBefore = await evalJs("return state.favs.size");
+    await evalJs(`document.querySelector('.row[data-path] [data-fav]').click(); return true`);
+    check("трек додається в улюблене", (await until(`
+      return state.favs.size === ${favBefore} + 1 ? true : null;`, 15, 300)) === true);
+    check("серце залилось кольором", (await evalJs(`
+      return document.querySelector('.row[data-path] [data-fav]').classList.contains('on');`)) === true);
+    check("улюблене переживає перезапит", (await evalJs(`
+      const list = await window.api.favList();
+      return list.length === state.favs.size;`)) === true);
+    await evalJs(`document.querySelector('.row[data-path] [data-fav]').click(); return true`);
+    check("повторний клік прибирає", (await until(`
+      return state.favs.size === ${favBefore} ? true : null;`, 15, 300)) === true);
+
+    check("пошук у Сховищі звужує список", (await evalJs(`
+      const inp = document.querySelector('#libSearch');
+      inp.value = 'цезаточнонезбігається';
+      inp.dispatchEvent(new Event('input', {bubbles:true}));
+      const after = document.querySelectorAll('.row[data-path]').length;
+      inp.value = '';
+      inp.dispatchEvent(new Event('input', {bubbles:true}));
+      const back = document.querySelectorAll('.row[data-path]').length;
+      return after === 0 && back > 0;`)) === true);
+
+    check("історія накопичилась", (await evalJs("return state.history.length")) > 0);
+    await evalJs(`document.querySelector('.navbtn[data-page=home]').click(); return true`);
+    const histShown = await until(`
+      const rows = document.querySelectorAll('.row[data-hist]');
+      return rows.length ? { n: rows.length } : null;`, 20, 400);
+    check("«нещодавно слухав» на Головній", histShown?.n > 0, `${histShown?.n} рядків`);
+    await shot("головна-з-історією");
+
     console.log("\n[11c] Плейлисти");
     // Плейлисти лежать у справжніх даних користувача, тому прибираємо за
     // собою: інакше кожен запуск лишав би сміття і ламав наступний.

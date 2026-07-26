@@ -22,6 +22,11 @@ const state = {
   /** шляхи файлів, обраних у Сховищі для правки тегів */
   libPicked: new Set(),
   playlists: [],
+  /** ключі (шлях або посилання) вподобаних треків */
+  favs: new Set(),
+  history: [],
+  /** фільтр у Сховищі */
+  libFilter: "",
   /** відкритий плейлист або null */
   openPl: null,
   /** черга відтворення: список треків і місце в ньому */
@@ -130,6 +135,9 @@ const ICONS = {
   shuffle: '<path d="M17 4.5 20 7l-3 2.5"/><path d="M17 14.5 20 17l-3 2.5"/><path d="M4 7h3.5l9 10H20"/><path d="M4 17h3.5l2.4-2.7"/><path d="M14.1 9.7 16.5 7H20"/>',
   repeat: '<path d="M7.5 4.5 5 7l2.5 2.5"/><path d="M16.5 19.5 19 17l-2.5-2.5"/><path d="M5 7h11a3 3 0 0 1 3 3v1"/><path d="M19 17H8a3 3 0 0 1-3-3v-1"/>',
   lyrics: '<path d="M4.5 6h11"/><path d="M4.5 10.5h11"/><path d="M4.5 15h7"/><circle cx="17.5" cy="17" r="2.2"/><path d="M19.7 17V9.5"/>',
+  heart: '<path d="M12 20s-7.5-4.6-7.5-9.4A4.1 4.1 0 0 1 12 7.6a4.1 4.1 0 0 1 7.5 3C19.5 15.4 12 20 12 20z"/>',
+  heartOn: '<path d="M12 20s-7.5-4.6-7.5-9.4A4.1 4.1 0 0 1 12 7.6a4.1 4.1 0 0 1 7.5 3C19.5 15.4 12 20 12 20z" fill="currentColor"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5.3l3.4 2"/>',
 };
 
 function icon(name, cls = "") {
@@ -291,6 +299,7 @@ function songRow(s) {
       <div class="dur">${dur(s.duration)}</div>
       <div class="act">
         ${dead ? "" : `<button data-act="listen" class="ghost iconbtn" title="Послухати не завантажуючи">${icon("play")}</button>`}
+        ${favBtn(s)}
         ${s.source === "ytmusic" ? `<button data-act="radio" class="ghost iconbtn" title="Радіо за цим треком">${icon("radio")}</button>` : ""}
         ${dead ? "" : `<button data-act="dl-one" class="primary">ЗАБИРАЮ!</button>`}
       </div>
@@ -505,6 +514,7 @@ function libRow(t) {
       <div class="dur">${dur(t.duration)}</div>
       <div class="act">
         <button data-lact="play" class="primary iconbtn">${icon(isPlaying && !audio.paused ? "pause" : "play")}</button>
+        ${favBtn(t)}
         <button data-lact="toplaylist" class="ghost">${icon("plus")} У плейлист</button>
         <button data-lact="tags" class="ghost">${icon("tag")} Теги</button>
         <button data-lact="reveal" class="ghost">${icon("reveal")} Показати</button>
@@ -522,6 +532,8 @@ function renderLibrary() {
   const head = `
     <div class="libhead">
       <h1>Сховище</h1>
+      <input type="text" id="libSearch" class="libfind" placeholder="Пошук у сховищі…"
+             spellcheck="false" value="${esc(state.libFilter)}" />
       <span class="grow"></span>
       <button class="ghost" id="libRescan">Оновити</button>
       <button class="ghost" id="libOpen">Відкрити теку</button>
@@ -538,11 +550,22 @@ function renderLibrary() {
     return;
   }
 
+  const q = norm(state.libFilter);
+  const shown = q
+    ? L.tracks.filter((t) => norm(`${t.artist} ${t.title} ${t.album} ${t.file}`).includes(q))
+    : L.tracks;
+
   const total = L.tracks.reduce((a, t) => a + t.size, 0);
   mainEl.innerHTML =
     head +
-    `<div class="note">${plural(L.tracks.length, TRACKS)} · ${mbStr(total)}</div>` +
-    `<div class="rows">${L.tracks.map(libRow).join("")}</div>`;
+    `<div class="note">${
+      q
+        ? `Знайдено ${plural(shown.length, TRACKS)} із ${plural(L.tracks.length, TRACKS)}`
+        : `${plural(L.tracks.length, TRACKS)} · ${mbStr(total)}`
+    }</div>` +
+    (shown.length
+      ? `<div class="rows">${shown.map(libRow).join("")}</div>`
+      : `<div class="note">Нічого не збіглося з «${esc(state.libFilter)}».</div>`);
   loadCovers();
 }
 
@@ -596,6 +619,29 @@ async function loadLibrary(force = false) {
 
 // ------------------------------------------------------------------ сторінка «Головна»
 
+/**
+ * Рядок історії. Зберігає і локальні файли, і мережеві треки, тому клік має
+ * вести туди, куди веде сам трек: файл — грати з диска, посилання — потоком.
+ */
+function histRow(t) {
+  const owned = state.owned.has(ownKey(t.artist, t.title));
+  const playing = trackKey(state.playing) === t.key;
+  return `
+    <div class="row${playing ? " playing" : ""}" data-hist="${esc(t.key)}">
+      <span></span>
+      ${img(t.thumb, "art")}
+      <div class="name">
+        <b>${esc(t.title)}${owned ? `<span class="badge owned">вже є</span>` : ""}</b>
+        <span class="sub">${esc(t.artist || "")}</span>
+      </div>
+      <div class="alb">${esc(t.album || "")}</div>
+      <div class="dur">${dur(t.duration)}</div>
+      <div class="act">
+        <button data-hact="histplay" class="primary iconbtn">${icon("play")}</button>
+      </div>
+    </div>`;
+}
+
 function mixCard(m) {
   return `
     <div class="card" data-hact="mix" data-id="${esc(m.playlistId || m.id)}" data-title="${esc(m.title)}">
@@ -612,8 +658,17 @@ function renderHome() {
   if (H.loading) return loading("Читаю рекомендації YouTube Music…");
   if (H.error) return fail("Не вдалося прочитати головну: " + H.error);
 
+  // Своє — вище чужого: те, що ти слухав, важливіше за чужі чарти.
+  const hist = state.history.slice(0, 12);
+  const mine = hist.length
+    ? `<h3 class="sec">${icon("clock")} Нещодавно слухав` +
+      `<button class="ghost tiny" data-hact="histclear">Очистити</button></h3>` +
+      `<div class="rows">${hist.map(histRow).join("")}</div>`
+    : "";
+
   mainEl.innerHTML =
     `<h1 class="page">Головна</h1>` +
+    mine +
     (H.sections.length
       ? H.sections
           .map(
@@ -1226,6 +1281,46 @@ async function saveTags() {
 /** Один ключ і для локального файлу, і для треку з пошуку. */
 const trackKey = (t) => (t ? t.path || t.url : null);
 
+function isFav(t) {
+  const k = trackKey(t);
+  return Boolean(k && state.favs.has(k));
+}
+
+function favBtn(t) {
+  const on = isFav(t);
+  return `<button data-fav="1" class="ghost iconbtn heart${on ? " on" : ""}" title="${
+    on ? "Прибрати з улюбленого" : "В улюблене"
+  }">${icon(on ? "heartOn" : "heart")}</button>`;
+}
+
+async function toggleFav(track) {
+  if (!track || !trackKey(track)) return;
+  const r = await window.api.favToggle(track);
+  state.favs = new Set(r.favorites.map((t) => t.key));
+  syncHearts();
+  toast(r.added ? "Додано в улюблене" : "Прибрано з улюбленого", [], 2200);
+}
+
+/** Перемальовує лише самі сердечка — без перезбирання всієї сторінки. */
+function syncHearts() {
+  for (const el of mainEl.querySelectorAll("[data-fav]")) {
+    const row = el.closest("[data-key],[data-path]");
+    const t = row?.dataset.path
+      ? state.library.tracks.find((x) => x.path === row.dataset.path)
+      : index.get(row?.dataset.key);
+    if (!t) continue;
+    const on = isFav(t);
+    el.classList.toggle("on", on);
+    el.innerHTML = icon(on ? "heartOn" : "heart");
+  }
+  const p = $("#plFav");
+  if (p) {
+    const on = isFav(state.playing);
+    p.classList.toggle("on", on);
+    p.innerHTML = icon(on ? "heartOn" : "heart");
+  }
+}
+
 /**
  * @param {object} track локальний файл ({path}) або результат пошуку ({url})
  * @param {object[]} [list] черга, у якій цей трек стоїть (для ⏭ і ⏮)
@@ -1254,6 +1349,14 @@ async function play(track, list) {
 
   state.playing = track;
   loadLyrics(); // якщо панель відкрита — показати текст уже нового треку
+  // В історію пишемо одразу при виборі: якщо чекати кінця треку, туди не
+  // потрапить нічого з того, що ти перемкнув на середині.
+  window.api
+    .histAdd({ ...track, key: trackKey(track) })
+    .then((h) => {
+      state.history = h;
+    })
+    .catch(() => {});
   $("#plTitle").textContent = track.title;
   $("#plArtist").textContent = track.artist || "невідомий виконавець";
   $("#plArt").src = track.thumb || BLANK;
@@ -1497,7 +1600,48 @@ $("#plNext").addEventListener("click", () => {
   const n = nextIndex(false);
   if (n >= 0) playAt(n);
 });
+$("#plFav").addEventListener("click", () => toggleFav(state.playing));
+$("#plRadio").addEventListener("click", () => {
+  const t = state.playing;
+  if (!t) return toast("Спершу увімкни трек.");
+  const id = videoIdOf(t);
+  if (!id) return toast("Радіо будується лише за треками YouTube Music.");
+  startRadio({ ...t, id, source: "ytmusic" });
+});
 $("#plLyrics").addEventListener("click", toggleLyrics);
+
+/**
+ * Гарячі клавіші. Свідомо не чіпаємо їх, коли фокус у полі вводу — інакше
+ * пробіл у назві плейлиста ставив би музику на паузу.
+ */
+document.addEventListener("keydown", (e) => {
+  if (!$("#askModal").hidden || !$("#tagModal").hidden || !$("#plModal").hidden) return;
+  const tag = e.target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target.isContentEditable) return;
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+  if (e.code === "Space") {
+    e.preventDefault();
+    if (state.playing) (audio.paused ? audio.play() : audio.pause());
+    return;
+  }
+  if (e.code === "ArrowRight" && audio.duration) {
+    audio.currentTime = Math.min(audio.duration, audio.currentTime + 5);
+    return;
+  }
+  if (e.code === "ArrowLeft" && audio.duration) {
+    audio.currentTime = Math.max(0, audio.currentTime - 5);
+    return;
+  }
+  if (e.code === "KeyN") {
+    const n = nextIndex(false);
+    if (n >= 0) playAt(n);
+    return;
+  }
+  if (e.code === "KeyP" && state.pq.i > 0) playAt(state.pq.i - 1);
+  if (e.code === "KeyL") toggleLyrics();
+  if (e.code === "KeyF" && state.playing) toggleFav(state.playing);
+});
 $("#lyricsClose").addEventListener("click", () => ($("#lyricsPanel").hidden = true));
 $("#plShuffle").addEventListener("click", () => {
   state.shuffle = !state.shuffle;
@@ -1611,10 +1755,35 @@ mainEl.addEventListener("click", (e) => {
     if (jb.dataset.jact === "reveal" && job?.files[0]) return window.api.reveal(job.files[0]);
   }
 
+  // --- серце: працює однаково для файлів і для треків із пошуку ---
+  const fb = e.target.closest("[data-fav]");
+  if (fb) {
+    const row = fb.closest("[data-key],[data-path]");
+    const t = row?.dataset.path
+      ? state.library.tracks.find((x) => x.path === row.dataset.path)
+      : index.get(row?.dataset.key);
+    return toggleFav(t);
+  }
+
   // --- головна ---
   const hb = e.target.closest("[data-hact]");
   if (hb) {
     if (hb.dataset.hact === "mix") return openMix(hb.dataset.id, hb.dataset.title);
+    if (hb.dataset.hact === "histclear") {
+      if (!confirm("Очистити історію прослуханого?")) return;
+      return window.api.histClear().then(() => {
+        state.history = [];
+        render();
+      });
+    }
+    if (hb.dataset.hact === "histplay") {
+      const key = hb.closest("[data-hist]")?.dataset.hist;
+      const t = state.history.find((x) => x.key === key);
+      if (!t) return;
+      // Локальний файл беремо зі Сховища — у ньому свіжі теги й тривалість.
+      const local = t.path && state.library.tracks.find((x) => x.path === t.path);
+      return play(local || t, state.history);
+    }
     if (hb.dataset.hact === "homeback") {
       state.view = { type: "empty" };
       return render();
@@ -1705,7 +1874,18 @@ mainEl.addEventListener("click", (e) => {
   if (e.target.id === "folderBtn" || e.target.closest("#folderBtn")) return chooseFolder();
 
   // --- клік по рядку треку вмикає галочку, по рядку Сховища — програвання ---
-  if (btn || lb || jb || pb || hb) return;
+  if (btn || lb || jb || pb || hb || fb) return;
+
+  // Клік по рядку історії — просто вмикає його.
+  const histRowEl = e.target.closest("[data-hist]");
+  if (histRowEl) {
+    const t = state.history.find((x) => x.key === histRowEl.dataset.hist);
+    if (t) {
+      const local = t.path && state.library.tracks.find((x) => x.path === t.path);
+      play(local || t, state.history);
+    }
+    return;
+  }
   const row = e.target.closest(".row");
   if (!row) return;
   if (row.dataset.path) {
@@ -1745,6 +1925,24 @@ mainEl.addEventListener("change", (e) => {
 });
 
 mainEl.addEventListener("input", (e) => {
+  if (e.target.id === "libSearch") {
+    state.libFilter = e.target.value;
+    // Перемальовуємо лише список: інакше поле втрачає фокус на кожній літері.
+    const q = norm(state.libFilter);
+    const shown = q
+      ? state.library.tracks.filter((t) =>
+          norm(`${t.artist} ${t.title} ${t.album} ${t.file}`).includes(q),
+        )
+      : state.library.tracks;
+    const rows = mainEl.querySelector(".rows");
+    if (rows) {
+      rows.innerHTML = shown.map(libRow).join("");
+      loadCovers();
+    } else render();
+    const note = mainEl.querySelectorAll(".note")[0];
+    if (note && q) note.textContent = `Знайдено ${plural(shown.length, TRACKS)} із ${plural(state.library.tracks.length, TRACKS)}`;
+    return;
+  }
   if (e.target.id === "discordId") {
     state.settings.discordAppId = e.target.value.trim();
     window.api.setSettings({ discordAppId: state.settings.discordAppId });
@@ -1913,6 +2111,8 @@ window.api.onClipboardLink((url) => {
   state.jobs = new Map((await window.api.dlList()).map((j) => [j.id, j]));
   refreshQueueBadge();
   await loadPlaylists();
+  state.favs = new Set((await window.api.favList()).map((t) => t.key));
+  state.history = await window.api.histList();
   render();
   loadHome();
 

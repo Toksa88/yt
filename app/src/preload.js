@@ -44,6 +44,12 @@ contextBridge.exposeInMainWorld("api", {
   mix: (playlistId) => call("reco:mix", playlistId),
   lyrics: (videoId) => call("reco:lyrics", videoId),
 
+  favList: () => call("fav:list"),
+  favToggle: (track) => call("fav:toggle", track),
+  histList: () => call("hist:list"),
+  histAdd: (track) => call("hist:add", track),
+  histClear: () => call("hist:clear"),
+
   plList: () => call("pl:list"),
   plCreate: (name) => call("pl:create", name),
   plRename: (id, name) => call("pl:rename", id, name),

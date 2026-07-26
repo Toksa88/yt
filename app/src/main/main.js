@@ -11,6 +11,7 @@ const library = require("./library");
 const tags = require("./tags");
 const stream = require("./stream");
 const playlists = require("./playlists");
+const personal = require("./personal");
 const { Discord } = require("./discord");
 
 const discord = new Discord();
@@ -187,7 +188,10 @@ handle("lib:tags", async (items, patch) => {
       library.forget(r.path);
       // Плейлист посилається на шлях, тож після перейменування його треба
       // полагодити — інакше трек тихо зникне зі списку.
-      if (r.renamed) playlists.repath(it.path, r.path);
+      if (r.renamed) {
+        playlists.repath(it.path, r.path);
+        personal.repath(it.path, r.path);
+      }
       results.push({ file: it.path, ok: true, path: r.path, renamed: r.renamed });
     } catch (e) {
       // Один заблокований файл не має зривати правку решти — але й мовчати
@@ -213,6 +217,12 @@ handle("reco:radio", (videoId) => search.radio(videoId));
 handle("reco:home", () => search.home());
 handle("reco:mix", (playlistId) => search.mixTracks(playlistId));
 handle("reco:lyrics", (videoId) => search.lyrics(videoId));
+
+handle("fav:list", () => personal.favorites());
+handle("fav:toggle", (track) => personal.favToggle(track));
+handle("hist:list", () => personal.history());
+handle("hist:add", (track) => personal.historyAdd(track));
+handle("hist:clear", () => personal.historyClear());
 
 handle("pl:list", () => playlists.load());
 handle("pl:create", (name) => playlists.create(name));
