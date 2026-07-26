@@ -854,6 +854,25 @@ function connect(url) {
     check("статус доїжджає до Discord", (await until(`
       return (await window.api.discordStatus()).connected ? true : null;`, 15, 400)) === true);
 
+    // Маленька панель Discord показує саме name. За замовчуванням там назва
+    // додатка, тому туди навмисно пишеться пісня, а не «Music».
+    const { Discord } = require("../src/main/discord");
+    const probe = new Discord();
+    let sent = null;
+    probe.sock = { write: (b) => (sent = JSON.parse(b.subarray(8).toString("utf8"))) };
+    probe.ready = true;
+    probe.setActivity({ title: "Cipher", artist: "Kevin MacLeod", duration: 200, position: 5 });
+    const act = sent?.args?.activity;
+    check("у назві активності — пісня, а не додаток", act?.name === "Cipher — Kevin MacLeod", act?.name || "");
+    check("виконавець і назва є окремими рядками",
+      act?.details === "Cipher" && act?.state === "Kevin MacLeod");
+    check("тип активності — «Слухає»", act?.type === 2);
+
+    sent = null;
+    probe.setActivity({ title: "Без виконавця" });
+    check("без виконавця назва не має хвоста", sent?.args?.activity?.name === "Без виконавця",
+      sent?.args?.activity?.name || "");
+
     // Знімаємо статус, але галочку НЕ вимикаємо: у власному профілі це вже
     // нікому не зашкодить, а лишати систему в іншому стані, ніж застали, —
     // погана звичка, з якої і виріс баг.

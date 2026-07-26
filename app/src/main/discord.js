@@ -154,10 +154,19 @@ class Discord extends EventEmitter {
 
     let activity = null;
     if (track) {
+      const title = String(track.title || "").slice(0, 128);
+      const artist = String(track.artist || "").slice(0, 128);
+
       activity = {
         type: 2, // «Слухає» замість «Грає»
-        details: String(track.title || "").slice(0, 128),
-        state: String(track.artist || "невідомий виконавець").slice(0, 128),
+        // Маленька панель Discord показує САМЕ name — за замовчуванням там
+        // стоїть назва зареєстрованого додатка, тобто просто «Music».
+        // Перевірено, що клієнт приймає власне значення, тож пишемо туди
+        // пісню: інакше друзі бачать назву програми, а не те, що ти слухаєш.
+        name: (artist ? `${title} — ${artist}` : title).slice(0, 128) || "Music",
+        // details і state показуються в картці профілю, окремими рядками.
+        details: title,
+        state: artist || "невідомий виконавець",
       };
 
       if (track.album) {
