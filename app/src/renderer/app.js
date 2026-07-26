@@ -6,7 +6,9 @@ const mainEl = $("#main");
 const audio = $("#audio");
 
 const state = {
-  page: "search",
+  // Стартова сторінка мусить збігатися з кнопкою, позначеною active в
+  // розмітці, інакше панель показує одне, а на екрані інше.
+  page: "home",
   tab: "songs",
   results: { songs: [], albums: [], artists: [] },
   view: { type: "empty" },
@@ -24,6 +26,10 @@ const state = {
   openPl: null,
   /** черга відтворення: список треків і місце в ньому */
   pq: { list: [], i: -1 },
+  shuffle: false,
+  /** "off" | "all" | "one" */
+  repeat: "off",
+  home: { sections: [], loaded: false, loading: false },
   /** ключі «виконавець|назва» того, що вже лежить на диску */
   owned: new Set(),
   playing: null,
@@ -119,6 +125,10 @@ const ICONS = {
   tag: '<path d="M11.5 3.5H20v8.5l-8.4 8.4a1.5 1.5 0 0 1-2.1 0l-6.4-6.4a1.5 1.5 0 0 1 0-2.1z"/><circle cx="16" cy="8" r="1.4"/>',
   reveal: '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v7.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 3 17.5z"/><path d="M12 11v5"/><path d="m9.6 13.4 2.4-2.4 2.4 2.4"/>',
   empty: '<circle cx="12" cy="12" r="8.5"/><path d="m6 18 12-12"/>',
+  home: '<path d="m3.5 10.5 8.5-7 8.5 7"/><path d="M5.5 9.6V20h13V9.6"/><path d="M10 20v-5.5h4V20"/>',
+  radio: '<circle cx="12" cy="12" r="2.4"/><path d="M8.2 8.2a5.4 5.4 0 0 0 0 7.6"/><path d="M15.8 15.8a5.4 5.4 0 0 0 0-7.6"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8"/><path d="M18.4 18.4a9 9 0 0 0 0-12.8"/>',
+  shuffle: '<path d="M17 4.5 20 7l-3 2.5"/><path d="M17 14.5 20 17l-3 2.5"/><path d="M4 7h3.5l9 10H20"/><path d="M4 17h3.5l2.4-2.7"/><path d="M14.1 9.7 16.5 7H20"/>',
+  repeat: '<path d="M7.5 4.5 5 7l2.5 2.5"/><path d="M16.5 19.5 19 17l-2.5-2.5"/><path d="M5 7h11a3 3 0 0 1 3 3v1"/><path d="M19 17H8a3 3 0 0 1-3-3v-1"/>',
 };
 
 function icon(name, cls = "") {
@@ -238,6 +248,7 @@ function songRow(s) {
       <div class="dur">${dur(s.duration)}</div>
       <div class="act">
         ${dead ? "" : `<button data-act="listen" class="ghost iconbtn" title="Послухати не завантажуючи">${icon("play")}</button>`}
+        ${s.source === "ytmusic" ? `<button data-act="radio" class="ghost iconbtn" title="Радіо за цим треком">${icon("radio")}</button>` : ""}
         ${dead ? "" : `<button data-act="dl-one" class="primary">ЗАБИРАЮ!</button>`}
       </div>
     </div>`;
@@ -539,6 +550,94 @@ async function loadLibrary(force = false) {
   }
 }
 
+// ------------------------------------------------------------------ сторінка «Головна»
+
+function mixCard(m) {
+  return `
+    <div class="card" data-hact="mix" data-id="${esc(m.playlistId || m.id)}" data-title="${esc(m.title)}">
+      ${img(m.thumb || avatar(m.title), "cover")}
+      <div class="t">${esc(m.title)}</div>
+      <div class="s">${esc(m.artist || "")}</div>
+    </div>`;
+}
+
+function renderHome() {
+  $("#tabs").hidden = true;
+  const H = state.home;
+
+  if (H.loading) return loading("Читаю рекомендації YouTube Music…");
+  if (H.error) return fail("Не вдалося прочитати головну: " + H.error);
+
+  mainEl.innerHTML =
+    `<h1 class="page">Головна</h1>` +
+    (H.sections.length
+      ? H.sections
+          .map(
+            (s) =>
+              `<h3 class="sec">${esc(s.title)}</h3><div class="grid">${s.items.map(mixCard).join("")}</div>`,
+          )
+          .join("")
+      : `<div class="note">Порожньо. Перевір інтернет і онови сторінку.</div>`);
+}
+
+async function loadHome(force = false) {
+  const H = state.home;
+  if (H.loading || (H.loaded && !force)) return;
+  H.loading = true;
+  H.error = null;
+  if (state.page === "home") render();
+  try {
+    H.sections = await window.api.home();
+    H.loaded = true;
+  } catch (e) {
+    H.error = e.message;
+  } finally {
+    H.loading = false;
+    if (state.page === "home") render();
+  }
+}
+
+/** Добірка з головної: показуємо треклист і одразу вмикаємо. */
+async function openMix(playlistId, title) {
+  loading("Відкриваю добірку…");
+  try {
+    const tracks = await window.api.mix(playlistId);
+    reindex(tracks);
+    state.view = { type: "mix", title, tracks };
+    state.page = "home";
+    $("#tabs").hidden = true;
+    mainEl.innerHTML = `
+      <button class="ghost back" data-hact="homeback">${icon("back")} Головна</button>
+      <div class="libhead">
+        <h1>${esc(title || "Добірка")}</h1>
+        <span class="grow"></span>
+        <button class="primary" data-hact="playmix">${icon("play")} Слухати все</button>
+      </div>
+      <div class="note">${plural(tracks.length, TRACKS)}</div>
+      <div class="rows">${tracks.map(songRow).join("")}</div>`;
+    state.mixTracks = tracks;
+  } catch (e) {
+    fail("Не вдалося відкрити добірку: " + e.message);
+  }
+}
+
+/** Радіо за треком — власні рекомендації YouTube Music. */
+async function startRadio(track) {
+  if (!track?.id) return;
+  toast("Складаю радіо…", [], 2500);
+  try {
+    const list = await window.api.radio(track.id);
+    if (!list.length) return toast("Для цього треку радіо немає.");
+    reindex(list);
+    // Сам трек попереду, далі рекомендації.
+    const full = [track, ...list.filter((t) => t.id !== track.id)];
+    play(full[0], full);
+    toast(`Радіо: ${plural(full.length, TRACKS)}`, [], 3500);
+  } catch (e) {
+    toast("Радіо не вийшло: " + e.message);
+  }
+}
+
 // ------------------------------------------------------------------ сторінка «Плейлисти»
 
 /** Плейлист зберігає шляхи; самі треки беремо зі Сховища. */
@@ -783,7 +882,11 @@ function render() {
   $("#topbar").hidden = state.page !== "search";
   $$(".navbtn").forEach((b) => b.classList.toggle("active", b.dataset.page === state.page));
 
-  if (state.page === "queue") renderQueue();
+  if (state.page === "home") {
+    if (state.view.type === "mix") {
+      /* треклист добірки вже намальовано openMix — не перемальовуємо */
+    } else renderHome();
+  } else if (state.page === "queue") renderQueue();
   else if (state.page === "library") renderLibrary();
   else if (state.page === "playlists") renderPlaylists();
   else if (state.page === "settings") renderSettings();
@@ -809,6 +912,10 @@ function render() {
 
 function goto(page) {
   state.page = page;
+  if (page === "home") {
+    state.view = { type: "empty" };
+    loadHome();
+  }
   if (page === "library") loadLibrary();
   if (page === "playlists") {
     state.openPl = null;
@@ -1136,10 +1243,44 @@ function playAt(i) {
   play(t);
 }
 
+/**
+ * Наступний індекс із урахуванням перемішування й повтору.
+ * @param {boolean} auto true — трек скінчився сам; false — натиснули ⏭
+ * @returns {number} -1 означає «далі нічого»
+ */
+function nextIndex(auto) {
+  const { list, i } = state.pq;
+  if (!list.length) return -1;
+
+  // Повтор одного спрацьовує лише сам собою: ⏭ має вести далі, інакше
+  // кнопка виглядала б зламаною.
+  if (auto && state.repeat === "one") return i;
+
+  if (state.shuffle) {
+    if (list.length === 1) return state.repeat === "off" && auto ? -1 : 0;
+    let n = i;
+    while (n === i) n = Math.floor(Math.random() * list.length);
+    return n;
+  }
+
+  if (i < list.length - 1) return i + 1;
+  return state.repeat === "all" ? 0 : -1;
+}
+
+function syncModeBtns() {
+  $("#plShuffle").classList.toggle("on", state.shuffle);
+  $("#plRepeat").classList.toggle("on", state.repeat !== "off");
+  $("#plRepeat").innerHTML = icon("repeat");
+  $("#plRepeat").title =
+    state.repeat === "one" ? "Повтор: один трек" : state.repeat === "all" ? "Повтор: увесь список" : "Повтор вимкнено";
+  $("#plRepeat").dataset.mode = state.repeat;
+}
+
 function syncNavBtns() {
   const { list, i } = state.pq;
   $("#plPrev").disabled = !(i > 0);
-  $("#plNext").disabled = !(i >= 0 && i < list.length - 1);
+  // У перемішаному режимі та при повторі списку «наступний» є завжди.
+  $("#plNext").disabled = !(i >= 0 && (state.shuffle || state.repeat === "all" || i < list.length - 1));
 }
 
 /** Те, що зараз грає, — у статус Discord. */
@@ -1200,8 +1341,14 @@ audio.addEventListener("play", syncPlayBtn);
 audio.addEventListener("pause", syncPlayBtn);
 audio.addEventListener("ended", () => {
   syncPlayBtn();
-  // Далі за чергою; якщо це був останній трек — просто зупиняємось.
-  if (state.pq.i >= 0 && state.pq.i < state.pq.list.length - 1) playAt(state.pq.i + 1);
+  const n = nextIndex(true);
+  if (n < 0) return; // черга скінчилась
+  if (n === state.pq.i) {
+    audio.currentTime = 0; // повтор одного треку
+    audio.play().catch(() => {});
+    return;
+  }
+  playAt(n);
 });
 audio.addEventListener("loadedmetadata", () => {
   $("#plEnd").textContent = dur(audio.duration);
@@ -1217,7 +1364,22 @@ audio.addEventListener("error", () => {
 
 $("#plPlay").addEventListener("click", () => (audio.paused ? audio.play() : audio.pause()));
 $("#plPrev").addEventListener("click", () => playAt(state.pq.i - 1));
-$("#plNext").addEventListener("click", () => playAt(state.pq.i + 1));
+$("#plNext").addEventListener("click", () => {
+  const n = nextIndex(false);
+  if (n >= 0) playAt(n);
+});
+$("#plShuffle").addEventListener("click", () => {
+  state.shuffle = !state.shuffle;
+  syncModeBtns();
+  syncNavBtns();
+  window.api.setSettings({ shuffle: state.shuffle }).catch(() => {});
+});
+$("#plRepeat").addEventListener("click", () => {
+  state.repeat = { off: "all", all: "one", one: "off" }[state.repeat];
+  syncModeBtns();
+  syncNavBtns();
+  window.api.setSettings({ repeat: state.repeat }).catch(() => {});
+});
 $("#plSeek").addEventListener("input", () => {
   if (audio.duration) audio.currentTime = (Number($("#plSeek").value) / 1000) * audio.duration;
 });
@@ -1255,6 +1417,7 @@ mainEl.addEventListener("click", (e) => {
       const queue = (state.results[state.tab] || []).filter((s) => s.kind === "song" && s.url);
       return play(it, queue.length ? queue : undefined);
     }
+    if (act === "radio") return startRadio(index.get(rowKey));
     if (act === "dl-one") return enqueue([index.get(rowKey)]);
     if (act === "dl-album") return enqueue([index.get(btn.dataset.key)]);
     if (act === "open-album") return openAlbum(index.get(btn.dataset.key));
@@ -1314,6 +1477,21 @@ mainEl.addEventListener("click", (e) => {
     if (jb.dataset.jact === "cancel") return window.api.dlCancel(jb.dataset.id);
     if (jb.dataset.jact === "retry") return window.api.dlRetry(jb.dataset.id);
     if (jb.dataset.jact === "reveal" && job?.files[0]) return window.api.reveal(job.files[0]);
+  }
+
+  // --- головна ---
+  const hb = e.target.closest("[data-hact]");
+  if (hb) {
+    if (hb.dataset.hact === "mix") return openMix(hb.dataset.id, hb.dataset.title);
+    if (hb.dataset.hact === "homeback") {
+      state.view = { type: "empty" };
+      return render();
+    }
+    if (hb.dataset.hact === "playmix") {
+      const list = state.mixTracks || [];
+      if (list.length) play(list[0], list);
+      return;
+    }
   }
 
   // --- плейлисти ---
@@ -1382,7 +1560,7 @@ mainEl.addEventListener("click", (e) => {
   if (e.target.id === "folderBtn" || e.target.closest("#folderBtn")) return chooseFolder();
 
   // --- клік по рядку треку вмикає галочку, по рядку Сховища — програвання ---
-  if (btn || lb || jb || pb) return;
+  if (btn || lb || jb || pb || hb) return;
   const row = e.target.closest(".row");
   if (!row) return;
   if (row.dataset.path) {
@@ -1571,6 +1749,9 @@ window.api.onClipboardLink((url) => {
   $$("#sources input").forEach((cb) => (cb.checked = s.sources.includes(cb.value)));
   audio.volume = s.volume ?? 0.8;
   $("#plVol").value = String(Math.round(audio.volume * 100));
+  state.shuffle = Boolean(s.shuffle);
+  state.repeat = ["off", "all", "one"].includes(s.repeat) ? s.repeat : "off";
+  syncModeBtns();
 
   const b = await window.api.binaries();
   if (!b.ok) {
@@ -1588,7 +1769,7 @@ window.api.onClipboardLink((url) => {
   refreshQueueBadge();
   await loadPlaylists();
   render();
-  $("#q").focus();
+  loadHome();
 
   // Навмисно НЕ під'єднуємось на старті: саме́ під'єднання малює в профілі
   // «грає Music» без жодної пісні. З'єднання встановиться з першим треком.

@@ -134,16 +134,25 @@ function connect(url) {
       return document.styleSheets.length > 0
           && b.backgroundImage.includes('gradient')
           && tab.borderBottomColor === 'rgb(124, 92, 255)';`)) === true);
+    // Регресія: активна кнопка в панелі й стартова сторінка розійшлися —
+    // панель світила «Головну», а на екрані був «Шукач», і рекомендації
+    // взагалі не вантажились.
+    check("активний розділ збігається зі станом", (await evalJs(`
+      return document.querySelector('.navbtn.active').dataset.page === state.page;`)) === true);
     check("місток api доступний", (await evalJs("return typeof window.api?.search")) === "function");
-    check("ліва панель має 5 розділів", (await evalJs("return document.querySelectorAll('.navbtn').length")) === 5);
+    check("ліва панель має 6 розділів", (await evalJs("return document.querySelectorAll('.navbtn').length")) === 6);
     // Підказка про буфер обміну має стояти НАД рядком пошуку, а не в кутку.
+    // Міряти можна лише там, де рядок пошуку взагалі є, тобто в Шукачі.
     check("підказка розташована вище пошуку", (await evalJs(`
+      const back = state.page;
+      document.querySelector('.navbtn[data-page=search]').click();
       const t = document.querySelector('#toast');
       const f = document.querySelector('#searchForm');
       t.hidden = false;
       const a = t.getBoundingClientRect(), b = f.getBoundingClientRect();
       t.hidden = true;
-      return a.bottom <= b.top + 1 && a.width > 200;`)) === true);
+      document.querySelector('.navbtn[data-page=' + back + ']').click();
+      return b.height > 0 && a.bottom <= b.top + 1 && a.width > 200;`)) === true);
     check("плеєр на місці й неактивний", (await evalJs(`
       return document.querySelector('#player').classList.contains('idle')
           && document.querySelector('#plPlay').disabled;`)) === true);
@@ -183,7 +192,53 @@ function connect(url) {
       d.remove();
       return h;`)) > 2);
 
+    console.log("\n[1b] Головна з рекомендаціями YouTube Music");
+    const homePage = await until(`
+      if (document.querySelector('.spinner')) return null;
+      const secs = [...document.querySelectorAll('h3.sec')].map(e => e.textContent);
+      const cards = document.querySelectorAll('.card').length;
+      return secs.length ? { secs, cards } : null;`, 40, 700);
+    check("головна завантажилась", Boolean(homePage),
+      homePage ? `${homePage.secs.length} секцій, ${homePage.cards} карток` : "не дочекались");
+    check("секції мають назви", homePage?.secs?.every((s) => s.trim().length > 1) === true,
+      (homePage?.secs || []).slice(0, 3).join(" / "));
+    await shot("головна");
+
+    await evalJs(`document.querySelector('[data-hact=mix]').click(); return true`);
+    const mix = await until(`
+      if (document.querySelector('.spinner')) return null;
+      const r = document.querySelectorAll('.row');
+      return r.length ? { n: r.length, first: r[0].querySelector('b').textContent } : null;`, 40, 700);
+    check("добірка відкривається треклистом", mix?.n > 0, mix ? `${mix.n} треків` : "не дочекались");
+    await shot("добірка");
+
+    console.log("\n[1c] Режими програвання");
+    check("перемішування перемикається", (await evalJs(`
+      const before = state.shuffle;
+      document.querySelector('#plShuffle').click();
+      const after = state.shuffle;
+      document.querySelector('#plShuffle').click();
+      return before !== after && state.shuffle === before;`)) === true);
+    check("повтор іде по колу off→all→one→off", (await evalJs(`
+      const seen = [];
+      for (let i = 0; i < 3; i++) { document.querySelector('#plRepeat').click(); seen.push(state.repeat); }
+      return seen.join(',');`)) === "all,one,off");
+    // Повтор одного треку не має ламати кнопку ⏭: вона мусить вести далі.
+    check("⏭ не застрягає при повторі одного", (await evalJs(`
+      state.pq = { list: [{url:'a'},{url:'b'},{url:'c'}], i: 1 };
+      state.repeat = 'one'; state.shuffle = false;
+      const auto = nextIndex(true), manual = nextIndex(false);
+      state.repeat = 'off'; state.pq = { list: [], i: -1 };
+      return auto === 1 && manual === 2;`)) === true);
+    check("кінець списку без повтору зупиняє", (await evalJs(`
+      state.pq = { list: [{url:'a'},{url:'b'}], i: 1 };
+      state.repeat = 'off'; state.shuffle = false;
+      const r = nextIndex(true);
+      state.pq = { list: [], i: -1 };
+      return r;`)) === -1);
+
     console.log("\n[2] Пошук «Black Magick SS»");
+    await evalJs(`document.querySelector('.navbtn[data-page=search]').click(); return true`);
     await evalJs(`
       document.querySelector('#q').value = 'Black Magick SS';
       document.querySelector('#searchForm').dispatchEvent(new Event('submit', {cancelable:true}));
@@ -446,6 +501,17 @@ function connect(url) {
     check("черга зібралась зі списку результатів", preview?.q > 1, `${preview?.q} треків`);
     check("кнопка «наступний» активна", (await evalJs("return !document.querySelector('#plNext').disabled")) === true);
     await shot("прослуховування-з-пошуку");
+
+    // Радіо — власні рекомендації YouTube Music за конкретним треком.
+    await evalJs(`document.querySelector('.row [data-act=radio]').click(); return true`);
+    const rad = await until(`
+      return state.pq.list.length > 5
+        ? { n: state.pq.list.length, first: state.pq.list[0].title,
+            second: state.pq.list[1] ? state.pq.list[1].title : null } : null;`, 30, 700);
+    check("радіо за треком зібралось", rad?.n > 5, rad ? `${rad.n} треків` : "не дочекались");
+    check("сам трек стоїть першим", Boolean(rad?.first), rad?.first || "");
+    check("далі йдуть інші треки", rad?.second && rad.second !== rad.first, rad?.second || "");
+    await evalJs(`document.querySelector('#audio').pause(); return true`);
     await evalJs(`document.querySelector('#plPlay').click(); return true`);
 
     console.log("\n[11c] Плейлисти");

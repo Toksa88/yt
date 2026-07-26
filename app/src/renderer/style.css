@@ -915,6 +915,35 @@ h3.sec {
   margin: 0;
   vertical-align: 0;
 }
+.pbtn.small {
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  color: var(--muted);
+}
+.pbtn.small:hover:not(:disabled) {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.pbtn.small .ic {
+  width: 15px;
+  height: 15px;
+}
+/* Увімкнений режим має бути видно з першого погляду, без вчитування. */
+.pbtn.small.on {
+  color: var(--accent-2);
+  background: #7c5cff24;
+}
+.pbtn.small.on[data-mode="one"]::after {
+  content: "1";
+  position: absolute;
+  margin: 14px 0 0 15px;
+  font-size: 9px;
+  font-weight: 700;
+}
+.pbtn.small[data-mode] {
+  position: relative;
+}
 .pbtn.big {
   width: 44px;
   height: 44px;

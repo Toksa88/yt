@@ -39,6 +39,11 @@ contextBridge.exposeInMainWorld("api", {
 
   streamUrl: (url) => call("stream:url", url),
 
+  radio: (videoId) => call("reco:radio", videoId),
+  home: () => call("reco:home"),
+  mix: (playlistId) => call("reco:mix", playlistId),
+  lyrics: (videoId) => call("reco:lyrics", videoId),
+
   plList: () => call("pl:list"),
   plCreate: (name) => call("pl:create", name),
   plRename: (id, name) => call("pl:rename", id, name),

@@ -376,6 +376,138 @@ async function resolveUrl(url, searchId) {
   return { title: info.title || url, songs };
 }
 
+// ---------------------------------------------------------------- рекомендації
+
+/** «2:18» -> 138. У радіо тривалість приходить рядком, а не числом. */
+function mmss(s) {
+  if (typeof s === "number") return secs(s);
+  const p = String(s || "").split(":").map(Number);
+  if (p.length === 2 && p.every(Number.isFinite)) return p[0] * 60 + p[1];
+  if (p.length === 3 && p.every(Number.isFinite)) return p[0] * 3600 + p[1] * 60 + p[2];
+  return null;
+}
+
+/**
+ * Радіо за треком — власна черга рекомендацій YouTube Music.
+ *
+ * Формат тут інший, ніж у пошуку: artists приходить одним рядком, duration —
+ * як «2:18», а thumbnail одиничним посиланням. Тому окремий перетворювач.
+ */
+async function radio(videoId) {
+  const y = await ytm();
+  const list = await y.getUpNexts(videoId);
+  return (list || [])
+    .filter((t) => t.videoId)
+    .map((t) => ({
+      kind: "song",
+      source: "ytmusic",
+      id: t.videoId,
+      url: `https://music.youtube.com/watch?v=${t.videoId}`,
+      title: t.title || t.name || "?",
+      artist: typeof t.artists === "string" ? t.artists : t.artists?.[0]?.name || "",
+      artistId: null,
+      album: "",
+      albumId: null,
+      duration: mmss(t.duration),
+      thumb: (t.thumbnail || "").replace(/=w\d+-h\d+/, "=w480-h480") || null,
+    }));
+}
+
+/** Головна YouTube Music: добірки, чарти, локальні хіти. */
+async function home() {
+  const y = await ytm();
+  const sections = await y.getHomeSections();
+  return (sections || [])
+    .map((s) => ({
+      title: s.title,
+      items: (s.contents || s.items || [])
+        .filter((i) => i && (i.playlistId || i.albumId || i.videoId))
+        .map((i) => ({
+          kind: i.videoId ? "song" : "mix",
+          source: "ytmusic",
+          id: i.playlistId || i.albumId || i.videoId,
+          playlistId: i.playlistId || null,
+          albumId: i.albumId || null,
+          videoId: i.videoId || null,
+          url: i.videoId ? `https://music.youtube.com/watch?v=${i.videoId}` : null,
+          title: i.name || i.title || "?",
+          artist: i.artist?.name || (typeof i.artists === "string" ? i.artists : "") || "",
+          thumb: biggestThumb(i.thumbnails) || i.thumbnail || null,
+        })),
+    }))
+    .filter((s) => s.items.length);
+}
+
+/**
+ * Треки добірки з головної.
+ *
+ * Головна складається з авто-міксів з ідентифікаторами виду RDCLAK5uy_…, і
+ * на них ytmusic-api відповідає 400 усіма трьома методами (перевірено). Такі
+ * списки читає yt-dlp, тож він тут запасний — повільніший, зате працює.
+ */
+async function mixTracks(playlistId) {
+  try {
+    const y = await ytm();
+    const list = await y.getPlaylistVideos(playlistId);
+    const mapped = (list || [])
+      .filter((t) => t.videoId)
+      .map((t) => ({
+        kind: "song",
+        source: "ytmusic",
+        id: t.videoId,
+        url: `https://music.youtube.com/watch?v=${t.videoId}`,
+        title: t.name || t.title || "?",
+        artist: t.artist?.name || (typeof t.artists === "string" ? t.artists : "") || "",
+        artistId: t.artist?.artistId || null,
+        album: "",
+        albumId: null,
+        duration: mmss(t.duration),
+        thumb: biggestThumb(t.thumbnails) || t.thumbnail || null,
+      }));
+    if (mapped.length) return mapped;
+  } catch {
+    /* нижче спробуємо через yt-dlp */
+  }
+
+  const rows = await ytdlpJson(
+    [
+      "--flat-playlist",
+      "--dump-json",
+      "--no-warnings",
+      "--ignore-errors",
+      `https://music.youtube.com/playlist?list=${playlistId}`,
+    ],
+    { timeout: 90000 },
+  );
+  return rows
+    .filter((e) => e.id && String(e.id).length === 11)
+    .map((e) => ({
+      kind: "song",
+      source: "ytmusic",
+      id: e.id,
+      url: `https://music.youtube.com/watch?v=${e.id}`,
+      title: e.track || e.title || "?",
+      artist: e.artist || e.uploader || e.channel || "",
+      artistId: null,
+      album: e.album || "",
+      albumId: null,
+      duration: secs(e.duration),
+      thumb: e.thumbnails?.length ? e.thumbnails[e.thumbnails.length - 1].url : e.thumbnail || null,
+    }));
+}
+
+/** Текст пісні; порожньо — нормальний результат для інструменталу. */
+async function lyrics(videoId) {
+  const y = await ytm();
+  try {
+    const l = await y.getLyrics(videoId);
+    const text = Array.isArray(l) ? l.join("\n") : String(l ?? "");
+    return text.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------- міст Spotify/Apple
 
 /** Виконує завдання пачками по `limit` — 50 запитів разом YouTube не любить. */
@@ -582,6 +714,10 @@ async function resolveCatalogItem(item) {
 
 module.exports = {
   cancel,
+  radio,
+  home,
+  mixTracks,
+  lyrics,
   searchAll,
   resolveBridge,
   bridgeProvider: bridge.provider,

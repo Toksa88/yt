@@ -17,7 +17,10 @@
           <span class="logo" data-icon="note"></span> Music&nbsp;Grabber
         </div>
 
-        <button class="navbtn active" data-page="search">
+        <button class="navbtn active" data-page="home">
+          <span class="nico" data-icon="home"></span> Головна
+        </button>
+        <button class="navbtn" data-page="search">
           <span class="nico" data-icon="search"></span> Шукач
         </button>
         <button class="navbtn" data-page="queue">
@@ -91,9 +94,11 @@
         <b id="plTitle">Нічого не грає</b>
         <small id="plArtist">Обери трек у Сховищі або в пошуку</small>
       </div>
+      <button class="pbtn small" id="plShuffle" title="Перемішати" data-icon="shuffle"></button>
       <button class="pbtn" id="plPrev" title="Попередній" data-icon="prev" disabled></button>
       <button class="pbtn big" id="plPlay" title="Грати / пауза" data-icon="play" disabled></button>
       <button class="pbtn" id="plNext" title="Наступний" data-icon="next" disabled></button>
+      <button class="pbtn small" id="plRepeat" title="Повтор" data-icon="repeat"></button>
       <div class="pseek">
         <input type="range" id="plSeek" min="0" max="1000" value="0" disabled />
         <span class="ptime"><span id="plNow">0:00</span> / <span id="plEnd">0:00</span></span>

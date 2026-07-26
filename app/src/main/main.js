@@ -209,6 +209,11 @@ handle("lib:trash", async (file) => {
 
 handle("stream:url", (url) => stream.resolve(url));
 
+handle("reco:radio", (videoId) => search.radio(videoId));
+handle("reco:home", () => search.home());
+handle("reco:mix", (playlistId) => search.mixTracks(playlistId));
+handle("reco:lyrics", (videoId) => search.lyrics(videoId));
+
 handle("pl:list", () => playlists.load());
 handle("pl:create", (name) => playlists.create(name));
 handle("pl:rename", (id, name) => playlists.rename(id, name));
