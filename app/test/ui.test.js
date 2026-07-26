@@ -211,9 +211,12 @@ function connect(url) {
     await shot("головна");
 
     await evalJs(`document.querySelector('[data-hact=mix]').click(); return true`);
+    // Чекаємо саме сторінку добірки, а не «якісь рядки»: на Головній тепер
+    // є ще й «Нещодавно слухав», і воно теж малюється рядками .row.
     const mix = await until(`
       if (document.querySelector('.spinner')) return null;
-      const r = document.querySelectorAll('.row');
+      if (!document.querySelector('[data-hact=playmix]')) return null;
+      const r = document.querySelectorAll('.row[data-key]');
       return r.length ? { n: r.length, first: r[0].querySelector('b').textContent } : null;`, 40, 700);
     check("добірка відкривається треклистом", mix?.n > 0, mix ? `${mix.n} треків` : "не дочекались");
     check("є кнопка завантажити всю добірку",
@@ -378,10 +381,27 @@ function connect(url) {
       state.jobs.set = (k, v) => { window.__seen.push(v.percent); return real(k, v); };
       return true;`);
 
-    await evalJs(`document.querySelector('.row [data-act=dl-one]').click(); return true`);
-    check("з'явилась підказка про чергу", (await until(`
+    const jobsBefore = await evalJs("return state.jobs.size");
+    await evalJs(`
+      const b = document.querySelector('.row [data-act=dl-one]');
+      window.__dlBtn = !!b;
+      if (b) b.click();
+      return true;`);
+    const toastSeen = await until(`
       const t = document.querySelector('#toast');
-      return (!t.hidden && t.textContent.includes('чергу')) ? true : null;`, 8, 300)) === true);
+      return (!t.hidden && t.textContent.includes('чергу')) ? true : null;`, 12, 300);
+    check(
+      "з'явилась підказка про чергу",
+      toastSeen === true,
+      toastSeen
+        ? ""
+        : await evalJs(`
+            const t = document.querySelector('#toast');
+            return 'кнопка=' + window.__dlBtn
+                 + ' | схована=' + t.hidden
+                 + ' | текст=' + JSON.stringify(t.textContent.trim().slice(0, 60))
+                 + ' | завдань було ${jobsBefore}, стало ' + state.jobs.size;`),
+    );
 
     await evalJs(`document.querySelector('.navbtn[data-page=queue]').click(); return true`);
     check("сторінка черги показує завдання", (await evalJs("return document.querySelectorAll('.job').length")) > 0);
@@ -419,6 +439,19 @@ function connect(url) {
     check("сховище знайшло завантажене", Boolean(lib), lib ? `${lib.n}: ${lib.artist} — ${lib.title}` : "не дочекались");
     check("теги прочитані з файлу", lib?.artist === "Kevin MacLeod", lib?.artist || "");
     check("показано формат і бітрейт", /^m4a \d+ kb\/s$/.test(lib?.tech || ""), lib?.tech || "");
+    // Регресія: кнопки в рядку були колонкою сітки і при opacity:0 однаково
+    // займали місце — шість кнопок з'їдали 470 із 894 пікселів, а назві
+    // лишалось 35, тож вона обрізалась завжди.
+    const cols = await evalJs(`
+      const row = document.querySelector('.row[data-path]');
+      const b = row.querySelector('.name b');
+      return { name: Math.round(row.querySelector('.name').getBoundingClientRect().width),
+               row: Math.round(row.getBoundingClientRect().width),
+               cut: b.scrollWidth > b.clientWidth + 1,
+               actAbsolute: getComputedStyle(row.querySelector('.act')).position };`);
+    check("назва не обрізана", cols?.cut === false, `колонка назви ${cols?.name}px із ${cols?.row}px`);
+    check("колонка назви отримала місце", cols?.name > cols?.row * 0.35, `${cols?.name}px`);
+    check("кнопки не займають місця в потоці", cols?.actAbsolute === "absolute", cols?.actAbsolute || "");
     // Обкладинки вантажаться ліниво (IntersectionObserver), тому не «поспимо
     // трохи», а дочекаємось: фіксована пауза давала випадкові провали.
     const cover = await until(`

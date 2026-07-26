@@ -453,8 +453,13 @@ h3.sec {
   gap: 2px;
 }
 .row {
+  position: relative;
   display: grid;
-  grid-template-columns: 26px 44px 1fr 180px 58px auto;
+  /* Колонки кнопок тут НЕМАЄ навмисно. Коли вона була (auto), невидимі
+     кнопки все одно займали місце: шість кнопок з'їдали 470 з 894 пікселів,
+     і на назву лишалось 35 — назва обрізалась завжди. Тепер кнопки лежать
+     поверх рядка й з'являються лише під курсором. */
+  grid-template-columns: 26px 44px minmax(0, 1fr) 180px 58px;
   align-items: center;
   gap: 12px;
   padding: 6px 10px;
@@ -513,13 +518,24 @@ h3.sec {
   text-align: right;
 }
 .row .act {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   gap: 6px;
+  align-items: center;
+  padding-left: 34px;
   opacity: 0;
+  pointer-events: none;
+  /* М'який перехід зліва, щоб кнопки не «врізались» у текст під ними. */
+  background: linear-gradient(90deg, #1b1b2600, #1b1b26e6 30px);
+  border-radius: 10px;
 }
 .row:hover .act,
 .row.sel .act {
   opacity: 1;
+  pointer-events: auto;
 }
 .row .act button {
   padding: 5px 10px;
