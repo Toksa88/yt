@@ -216,6 +216,19 @@ function connect(url) {
       const r = document.querySelectorAll('.row');
       return r.length ? { n: r.length, first: r[0].querySelector('b').textContent } : null;`, 40, 700);
     check("добірка відкривається треклистом", mix?.n > 0, mix ? `${mix.n} треків` : "не дочекались");
+    check("є кнопка завантажити всю добірку",
+      (await evalJs("return !!document.querySelector('[data-hact=grabmix]')")) === true);
+    // Уся добірка має ставати ОДНИМ завданням, а не півсотнею окремих.
+    const grab = await evalJs(`
+      const before = state.jobs.size;
+      document.querySelector('[data-hact=grabmix]').click();
+      await new Promise(r => setTimeout(r, 1200));
+      const jobs = [...state.jobs.values()];
+      const last = jobs[jobs.length - 1];
+      for (const j of jobs.slice(before)) await window.api.dlCancel(j.id);
+      return { added: state.jobs.size - before, isPlaylist: !!last && /playlist\\?list=/.test(last.url) };`);
+    check("добірка стала одним завданням", grab?.added === 1, `додано ${grab?.added}`);
+    check("завдання вказує на плейлист", grab?.isPlaylist === true);
     await shot("добірка");
 
     console.log("\n[1c] Режими програвання");
@@ -570,6 +583,12 @@ function connect(url) {
     await evalJs(`document.querySelector('#selPl').click(); return true`);
     await sleep(300);
     check("вікно вибору плейлиста відкрилось", (await evalJs("return !document.querySelector('#plModal').hidden")) === true);
+    // Регресія: у Electron window.prompt кидає виняток «prompt() is not
+    // supported» і рве весь обробник — кнопка «Створити плейлист» мовчала.
+    check("prompt справді непридатний у Electron", (await evalJs(`
+      try { window.prompt('x'); return 'працює'; } catch (e) { return e.message; }`))
+      === "prompt() is not supported.");
+
     await evalJs(`
       document.querySelector('#plNewName').value = ${JSON.stringify(PL_NAME)};
       document.querySelector('#plCreateAdd').click();
@@ -596,6 +615,43 @@ function connect(url) {
     check("всередині плейлиста видно трек",
       (await evalJs("return document.querySelectorAll('.row[data-path]').length")) === 1);
     await shot("плейлист");
+
+    // Кнопка «Створити плейлист» на самій сторінці — та, що мовчала через prompt.
+    await evalJs(`document.querySelector('[data-plact=back]').click(); return true`);
+    await sleep(300);
+    const NEW2 = `Тест2 ${Date.now()}`;
+    await evalJs(`document.querySelector('[data-plact=new]').click(); return true`);
+    check("вікно вводу назви відкрилось",
+      (await evalJs("return !document.querySelector('#askModal').hidden")) === true);
+    await evalJs(`
+      document.querySelector('#askInput').value = ${JSON.stringify(NEW2)};
+      document.querySelector('#askOk').click();
+      return true;`);
+    check("плейлист створено кнопкою", (await until(`
+      const p = state.playlists.find(p => p.name === ${JSON.stringify(NEW2)});
+      return p ? true : null;`, 15, 400)) === true);
+
+    // Перейменування теж було на prompt.
+    const REN = `Тест3 ${Date.now()}`;
+    await evalJs(`
+      [...document.querySelectorAll('.plcard')]
+        .find(c => c.textContent.includes(${JSON.stringify(NEW2)}))
+        .querySelector('[data-plact=rename]').click();
+      return true;`);
+    await sleep(300);
+    await evalJs(`
+      document.querySelector('#askInput').value = ${JSON.stringify(REN)};
+      document.querySelector('#askOk').click();
+      return true;`);
+    check("перейменування працює", (await until(`
+      return state.playlists.some(p => p.name === ${JSON.stringify(REN)}) ? true : null;`, 15, 400)) === true);
+
+    await evalJs(`
+      for (const p of await window.api.plList()) {
+        if (/^Тест[23] /.test(p.name)) await window.api.plRemove(p.id);
+      }
+      state.playlists = await window.api.plList();
+      return true;`);
 
     const left = await evalJs(`
       for (const p of await window.api.plList()) {

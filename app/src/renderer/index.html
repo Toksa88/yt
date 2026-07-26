@@ -127,6 +127,22 @@
       <div class="lbody" id="lyricsBody"></div>
     </div>
 
+    <!-- Власне вікно вводу: window.prompt() в Electron не просто не працює,
+         а кидає виняток і рве весь обробник кліку. -->
+    <div class="modal" id="askModal" hidden>
+      <div class="mbox">
+        <h3 id="askTitle">Назва</h3>
+        <label class="field">
+          <span id="askLabel">Введи назву</span>
+          <input type="text" id="askInput" spellcheck="false" />
+        </label>
+        <div class="mact">
+          <button class="ghost" id="askCancel">Скасувати</button>
+          <button class="primary" id="askOk">Гаразд</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal" id="plModal" hidden>
       <div class="mbox">
         <h3>Додати в плейлист</h3>

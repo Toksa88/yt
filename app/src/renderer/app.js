@@ -202,6 +202,48 @@ function fail(text) {
   mainEl.innerHTML = `<div class="note err">${esc(text)}</div>`;
 }
 
+/**
+ * Заміна window.prompt: у Electron він кидає «prompt() is not supported» і
+ * рве обробник кліку, через що кнопки просто мовчали.
+ * @returns {Promise<string|null>} null, якщо скасували
+ */
+function askText({ title, label, value = "", ok = "Гаразд" }) {
+  return new Promise((resolve) => {
+    const modal = $("#askModal");
+    const input = $("#askInput");
+    $("#askTitle").textContent = title;
+    $("#askLabel").textContent = label;
+    $("#askOk").textContent = ok;
+    input.value = value;
+    modal.hidden = false;
+    input.focus();
+    input.select();
+
+    const done = (val) => {
+      modal.hidden = true;
+      $("#askOk").removeEventListener("click", onOk);
+      $("#askCancel").removeEventListener("click", onCancel);
+      input.removeEventListener("keydown", onKey);
+      modal.removeEventListener("click", onBackdrop);
+      resolve(val);
+    };
+    const onOk = () => done(input.value.trim() || null);
+    const onCancel = () => done(null);
+    const onKey = (e) => {
+      if (e.key === "Enter") onOk();
+      if (e.key === "Escape") onCancel();
+    };
+    const onBackdrop = (e) => {
+      if (e.target === modal) onCancel();
+    };
+
+    $("#askOk").addEventListener("click", onOk);
+    $("#askCancel").addEventListener("click", onCancel);
+    input.addEventListener("keydown", onKey);
+    modal.addEventListener("click", onBackdrop);
+  });
+}
+
 let toastTimer = null;
 function toast(text, actions = [], ms = 9000) {
   $("#toastText").textContent = text;
@@ -463,6 +505,7 @@ function libRow(t) {
       <div class="dur">${dur(t.duration)}</div>
       <div class="act">
         <button data-lact="play" class="primary iconbtn">${icon(isPlaying && !audio.paused ? "pause" : "play")}</button>
+        <button data-lact="toplaylist" class="ghost">${icon("plus")} У плейлист</button>
         <button data-lact="tags" class="ghost">${icon("tag")} Теги</button>
         <button data-lact="reveal" class="ghost">${icon("reveal")} Показати</button>
         <button data-lact="trash" class="ghost danger">${icon("trash")} У кошик</button>
@@ -613,10 +656,13 @@ async function openMix(playlistId, title) {
         <h1>${esc(title || "Добірка")}</h1>
         <span class="grow"></span>
         <button class="primary" data-hact="playmix">${icon("play")} Слухати все</button>
+        <button class="primary" data-hact="grabmix">${icon("download")} ЗАБИРАЮ ВСЕ!</button>
       </div>
       <div class="note">${plural(tracks.length, TRACKS)}</div>
       <div class="rows">${tracks.map(songRow).join("")}</div>`;
     state.mixTracks = tracks;
+    state.mixId = playlistId;
+    state.mixTitle = title;
   } catch (e) {
     fail("Не вдалося відкрити добірку: " + e.message);
   }
@@ -675,7 +721,9 @@ function renderPlaylists() {
       ${
         tracks.length
           ? `<div class="rows">${tracks.map((t) => plTrackRow(t, pl.id)).join("")}</div>`
-          : `<div class="note">Порожньо. Вибери треки у Сховищі й тисни «У плейлист».</div>`
+          : `<div class="note info">Порожньо. Треки додаються зі <b>Сховища</b>: наведи на трек
+               і тисни «У плейлист», або постав галочки на кількох одразу — тоді кнопка
+               з'явиться внизу екрана.</div>`
       }`;
     loadCovers();
     return;
@@ -706,7 +754,8 @@ function renderPlaylists() {
       </div>`,
             )
             .join("")
-        : `<div class="note">Плейлистів ще немає. Створи перший — або вибери треки у Сховищі й тисни «У плейлист».</div>`
+        : `<div class="note info">Плейлистів ще немає. Натисни <b>«Створити плейлист»</b> угорі,
+             а тоді додавай у нього треки зі <b>Сховища</b> кнопкою «У плейлист».</div>`
     }`;
 }
 
@@ -1533,6 +1582,7 @@ mainEl.addEventListener("click", (e) => {
       refreshSelbar();
       return;
     }
+    if (lb.dataset.lact === "toplaylist") return openPlModal([p]);
     if (lb.dataset.lact === "tags") return openTagEditor([p]);
     if (lb.dataset.lact === "play") {
       // Черга — увесь видимий список, щоб працювали ⏭ і автоперехід.
@@ -1574,6 +1624,20 @@ mainEl.addEventListener("click", (e) => {
       if (list.length) play(list[0], list);
       return;
     }
+    if (hb.dataset.hact === "grabmix") {
+      if (!state.mixId) return;
+      // Одним завданням, а не півсотнею окремих: так yt-dlp качає список
+      // послідовно, показує «трек X з Y» і складає все в теку добірки.
+      return enqueue([
+        {
+          kind: "album",
+          title: state.mixTitle || "Добірка",
+          artist: "",
+          thumb: state.mixTracks?.[0]?.thumb || null,
+          url: `https://music.youtube.com/playlist?list=${state.mixId}`,
+        },
+      ]);
+    }
   }
 
   // --- плейлисти ---
@@ -1590,19 +1654,18 @@ mainEl.addEventListener("click", (e) => {
       return render();
     }
     if (act === "new") {
-      const name = prompt("Назва нового плейлиста:");
-      if (!name?.trim()) return;
-      return window.api.plCreate(name).then((list) => {
-        state.playlists = list;
+      return askText({ title: "Новий плейлист", label: "Назва", ok: "Створити" }).then(async (name) => {
+        if (!name) return;
+        state.playlists = await window.api.plCreate(name);
         render();
+        toast(`Плейлист «${name}» створено. Додавай треки кнопкою «У плейлист» у Сховищі.`, [], 6000);
       });
     }
     if (act === "rename") {
       const cur = state.playlists.find((p) => p.id === id);
-      const name = prompt("Нова назва:", cur?.name || "");
-      if (!name?.trim()) return;
-      return window.api.plRename(id, name).then((list) => {
-        state.playlists = list;
+      return askText({ title: "Перейменувати", label: "Назва", value: cur?.name || "" }).then(async (name) => {
+        if (!name) return;
+        state.playlists = await window.api.plRename(id, name);
         render();
       });
     }
