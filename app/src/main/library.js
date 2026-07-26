@@ -45,6 +45,25 @@ async function walk(dir, depth, out) {
   }
 }
 
+/**
+ * Обкладинка як звичайне посилання.
+ *
+ * Потрібна для статусу в Discord: він приймає лише http(s), а вшита в файл
+ * картинка — це data:. Проте yt-dlp лишає в тегах адресу джерела (©cmt у m4a,
+ * purl у mp3), і з неї виводиться адреса прев'ю на YouTube.
+ */
+function youtubeThumb(md) {
+  for (const list of Object.values(md.native || {})) {
+    for (const tag of list) {
+      const v =
+        typeof tag.value === "string" ? tag.value : tag.value?.text || tag.value?.url || "";
+      const m = String(v).match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11})/);
+      if (m) return `https://i.ytimg.com/vi/${m[1]}/hqdefault.jpg`;
+    }
+  }
+  return null;
+}
+
 async function readTags(file) {
   let st;
   try {
@@ -63,6 +82,7 @@ async function readTags(file) {
   let duration = null;
   let bitrate = null;
   let hasCover = false;
+  let thumbUrl = null;
 
   try {
     const { parseFile } = await mm();
@@ -74,6 +94,7 @@ async function readTags(file) {
     hasCover = Boolean(c.picture?.length);
     duration = md.format?.duration ? Math.round(md.format.duration) : null;
     bitrate = md.format?.bitrate ? Math.round(md.format.bitrate / 1000) : null;
+    thumbUrl = youtubeThumb(md);
   } catch {
     // Файл може бути битим або ще дозаписуватись — тоді показуємо його
     // за іменем. Ховати його зі списку було б гірше: користувач бачить
@@ -100,6 +121,7 @@ async function readTags(file) {
     duration,
     bitrate,
     hasCover,
+    thumbUrl,
     size: st.size,
     mtime: st.mtimeMs,
   };

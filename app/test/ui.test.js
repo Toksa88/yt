@@ -153,6 +153,22 @@ function connect(url) {
       const el = document.querySelector('#selbar');
       return el.hidden && getComputedStyle(el).display === 'none';`)) === true);
     check("попередження про бінарники не показано", (await evalJs("return document.querySelector('#warn').hidden")) === true);
+    // Емодзі кожна система малює по-своєму, тому інтерфейс має бути на SVG.
+    check("іконки — SVG, а не емодзі", (await evalJs(`
+      const svgs = document.querySelectorAll('.nico svg.ic, .sico svg.ic, .pbtn svg.ic');
+      const text = [...document.querySelectorAll('.navbtn, .pbtn, .brand')]
+        .map(e => e.textContent).join('');
+      const emoji = /[\\u{1F300}-\\u{1FAFF}\\u{2600}-\\u{27BF}\\u{2190}-\\u{21FF}\\u{25A0}-\\u{25FF}\\u{2660}-\\u{2669}]/u;
+      return { n: svgs.length, leftover: (text.match(emoji) || [])[0] || null };`)).n >= 9);
+    check("емодзі в панелі й плеєрі не лишилось", (await evalJs(`
+      const text = [...document.querySelectorAll('.navbtn, .pbtn, .brand')]
+        .map(e => e.textContent).join('');
+      const emoji = /[\\u{1F300}-\\u{1FAFF}\\u{2600}-\\u{27BF}\\u{2190}-\\u{21FF}\\u{25A0}-\\u{25FF}\\u{2660}-\\u{2669}]/u;
+      return (text.match(emoji) || [])[0] || 'чисто';`)) === "чисто");
+    check("іконка успадковує колір тексту", (await evalJs(`
+      const s = document.querySelector('.nico svg.ic');
+      return s && s.getAttribute('stroke') === 'currentColor';`)) === true);
+
     check("множина українською", (await evalJs(`
       return [1,2,5,11,21,102].map(n => plural(n, TRACKS)).join('|');`))
       === "1 трек|2 треки|5 треків|11 треків|21 трек|102 треки");
@@ -329,10 +345,17 @@ function connect(url) {
     check("сховище знайшло завантажене", Boolean(lib), lib ? `${lib.n}: ${lib.artist} — ${lib.title}` : "не дочекались");
     check("теги прочитані з файлу", lib?.artist === "Kevin MacLeod", lib?.artist || "");
     check("показано формат і бітрейт", /^m4a \d+ kb\/s$/.test(lib?.tech || ""), lib?.tech || "");
-    await sleep(900); // дати обкладинці підвантажитись
-    check("обкладинка витягнута з файлу", (await evalJs(`
+    // Обкладинки вантажаться ліниво (IntersectionObserver), тому не «поспимо
+    // трохи», а дочекаємось: фіксована пауза давала випадкові провали.
+    const cover = await until(`
       const im = document.querySelector('.row[data-path] .art');
-      return im && im.src.startsWith('data:image') && im.src.length > 2000;`)) === true);
+      if (!im) return null;
+      return im.src.startsWith('data:image') && im.src.length > 2000
+        ? true : null;`, 20, 400);
+    check("обкладинка витягнута з файлу", cover === true,
+      cover ? "" : await evalJs(`
+        const im = document.querySelector('.row[data-path] .art');
+        return im ? im.src.slice(0, 40) + ' довж=' + im.src.length : 'рядка нема';`));
     await shot("сховище");
 
     console.log("\n[10] Плеєр");
@@ -397,10 +420,10 @@ function connect(url) {
     check("обкладинка й тривалість не постраждали", (await evalJs(`
       const r = document.querySelector('.row[data-path]');
       return r.querySelector('.dur').textContent;`)) === "3:51");
-    await sleep(900);
-    check("обкладинка все ще всередині файлу", (await evalJs(`
+    check("обкладинка все ще всередині файлу", (await until(`
       const im = document.querySelector('.row[data-path] .art');
-      return im && im.src.startsWith('data:image') && im.src.length > 2000;`)) === true);
+      if (!im) return null;
+      return im.src.startsWith('data:image') && im.src.length > 2000 ? true : null;`, 20, 400)) === true);
     await shot("теги-змінено");
 
     console.log("\n[11b] Прослуховування прямо з пошуку");
@@ -499,13 +522,42 @@ function connect(url) {
       catch (e) { return e.message; }`);
     check("порожнє поле бере вшитий ID і підключається", empty === "ok", empty || "");
 
-    const act = await evalJs(`
+    // Головне: саме́ під'єднання малює в профілі голе «грає ‹додаток›» без
+    // пісні — саме це й було видно. Тому без треку ми маємо БУТИ ВІДКЛЮЧЕНІ.
+    await evalJs(`await window.api.setSettings({ discordEnabled: true }); return true;`);
+    await evalJs(`await window.api.discordActivity(null); return true;`);
+    check("без музики з'єднання розірване",
+      (await evalJs("return (await window.api.discordStatus()).connected")) === false);
+
+    // Перший виклик з треком лише ЗАПУСКАЄ під'єднання, тому цілком законно
+    // повертає false: статус піде відразу після READY. Перевіряємо результат,
+    // а не миттєве повернення.
+    const why = await evalJs(`
+      window.__err = null;
+      try { await window.api.discordConnect(''); } catch (e) { window.__err = e.message; }
+      return window.__err;`);
+    check("під'єднання зі вшитим ID проходить", why === null, why || "");
+
+    await evalJs(`
       return await window.api.discordActivity({
         title: 'Cipher', artist: 'Kevin MacLeod', album: 'Light Electronic',
         duration: 231, position: 5, paused: false });`);
-    // false тут означає лише «галочку не ввімкнено» — це теж правильна поведінка.
-    check("статус приймається без помилок", act === true || act === false, `повернуто ${act}`);
-    await evalJs(`await window.api.discordDisconnect(); return true;`);
+    check("статус доїжджає до Discord", (await until(`
+      return (await window.api.discordStatus()).connected ? true : null;`, 15, 400)) === true);
+
+    await evalJs(`
+      await window.api.discordActivity(null);
+      await window.api.setSettings({ discordEnabled: false });
+      return true;`);
+
+    // Обкладинка для Discord: вшиту в файл (data:) він не бере, тому шлях до
+    // прев'ю виводиться з посилання, що yt-dlp лишає в тегах.
+    const thumb = await evalJs(`
+      const t = state.library.tracks[0];
+      return t ? { url: t.thumbUrl, file: t.file } : null;`);
+    check("у завантаженого треку є посилання на обкладинку",
+      /^https:\/\/i\.ytimg\.com\/vi\/[\w-]{11}\//.test(thumb?.url || ""),
+      thumb?.url || `нема (${thumb?.file})`);
 
     console.log("\n[12] Налаштування");
     await evalJs(`document.querySelector('.navbtn[data-page=settings]').click(); return true`);

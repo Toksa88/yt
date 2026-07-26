@@ -91,6 +91,51 @@ function badge(src) {
   return `<span class="badge ${esc(src)}">${esc(SRC_NAME[src] || src)}</span>`;
 }
 
+/**
+ * Іконки.
+ *
+ * Малюємо їх самі, а не емодзі: емодзі кожна система малює по-своєму (десь
+ * кольорові, десь ні, десь іншого розміру), і вирівняти їх у рядку неможливо.
+ * SVG успадковує колір тексту через currentColor і масштабується разом із ним.
+ */
+const ICONS = {
+  search: '<circle cx="11" cy="11" r="7"/><path d="M20.5 20.5 16.7 16.7"/>',
+  download: '<path d="M12 4v11"/><path d="m7 10.5 5 5 5-5"/><path d="M4.5 19.5h15"/>',
+  library: '<circle cx="7" cy="17.5" r="2.8"/><circle cx="18" cy="15.5" r="2.5"/><path d="M9.8 17.5V6.4l10.7-2.2v11.3"/>',
+  playlist: '<path d="M4 7h11"/><path d="M4 12h11"/><path d="M4 17h7"/><circle cx="17.5" cy="16.5" r="2.5"/><path d="M20 16.5V9.5"/>',
+  settings:
+    '<circle cx="12" cy="12" r="3"/><path d="M19.4 14.5a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.9 2.9l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-3-1.2l-.1.1a2 2 0 1 1-2.9-2.9l.1-.1a1.7 1.7 0 0 0-1.2-2.9h-.2a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.2-3l-.1-.1a2 2 0 1 1 2.9-2.9l.1.1a1.7 1.7 0 0 0 1.9.3h.1A1.7 1.7 0 0 0 10 3.3v-.2a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.9 2.9l-.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.6 1.2Z"/>',
+  volume: '<path d="M11 5 6.5 9H3v6h3.5L11 19z"/><path d="M15 9.5a4 4 0 0 1 0 5"/><path d="M17.8 7a8 8 0 0 1 0 10"/>',
+  folder: '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v7.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 3 17.5z"/>',
+  play: '<path d="M8 5.2 19 12 8 18.8z" fill="currentColor" stroke="none"/>',
+  pause: '<rect x="7" y="5" width="3.4" height="14" rx="1" fill="currentColor" stroke="none"/><rect x="13.6" y="5" width="3.4" height="14" rx="1" fill="currentColor" stroke="none"/>',
+  prev: '<path d="M18 5.5 9 12l9 6.5z" fill="currentColor" stroke="none"/><rect x="5" y="5.5" width="2.4" height="13" rx="1" fill="currentColor" stroke="none"/>',
+  next: '<path d="M6 5.5 15 12l-9 6.5z" fill="currentColor" stroke="none"/><rect x="16.6" y="5.5" width="2.4" height="13" rx="1" fill="currentColor" stroke="none"/>',
+  close: '<path d="m6 6 12 12"/><path d="m18 6-12 12"/>',
+  back: '<path d="M19 12H5"/><path d="m11 6-6 6 6 6"/>',
+  note: '<circle cx="7" cy="17.5" r="2.8"/><path d="M9.8 17.5V4.5l9 2.2"/>',
+  plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
+  trash: '<path d="M4.5 7h15"/><path d="M9.5 7V4.8h5V7"/><path d="M6.5 7 7.4 19a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/>',
+  tag: '<path d="M11.5 3.5H20v8.5l-8.4 8.4a1.5 1.5 0 0 1-2.1 0l-6.4-6.4a1.5 1.5 0 0 1 0-2.1z"/><circle cx="16" cy="8" r="1.4"/>',
+  reveal: '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v7.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 3 17.5z"/><path d="M12 11v5"/><path d="m9.6 13.4 2.4-2.4 2.4 2.4"/>',
+  empty: '<circle cx="12" cy="12" r="8.5"/><path d="m6 18 12-12"/>',
+};
+
+function icon(name, cls = "") {
+  return (
+    `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" ` +
+    `stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    `${ICONS[name] || ""}</svg>`
+  );
+}
+
+/** Заповнює статичні місця в розмітці, позначені data-icon. */
+function paintIcons(root = document) {
+  for (const el of root.querySelectorAll("[data-icon]")) {
+    el.innerHTML = icon(el.dataset.icon);
+  }
+}
+
 /** Порожня картинка замість битого посилання (обкладинок часто просто немає). */
 const BLANK =
   "data:image/svg+xml;utf8," +
@@ -192,7 +237,7 @@ function songRow(s) {
       <div class="alb">${esc(s.album || "")}</div>
       <div class="dur">${dur(s.duration)}</div>
       <div class="act">
-        ${dead ? "" : `<button data-act="listen" class="ghost" title="Послухати не завантажуючи">▶</button>`}
+        ${dead ? "" : `<button data-act="listen" class="ghost iconbtn" title="Послухати не завантажуючи">${icon("play")}</button>`}
         ${dead ? "" : `<button data-act="dl-one" class="primary">ЗАБИРАЮ!</button>`}
       </div>
     </div>`;
@@ -235,7 +280,9 @@ function renderResults() {
 
   if (!list.length) {
     mainEl.innerHTML =
-      head + `<div class="empty"><div class="empty-ico">∅</div><p>Тут нічого не знайшлося. Спробуй іншу вкладку або інший запит.</p></div>`;
+      head +
+      `<div class="empty"><div class="empty-ico">${icon("empty")}</div>` +
+      `<p>Тут нічого не знайшлося. Спробуй іншу вкладку або інший запит.</p></div>`;
     return;
   }
 
@@ -250,7 +297,7 @@ function renderAlbum(a) {
   const canGrab = Boolean(a.url);
 
   mainEl.innerHTML = `
-    <button class="ghost back" data-act="back">← Назад</button>
+    <button class="ghost back" data-act="back">${icon("back")} Назад</button>
     <div class="detail-head">
       ${img(a.thumb, "cover")}
       <div class="meta">
@@ -277,7 +324,7 @@ function renderArtist(a) {
   const grid = (items) => (items?.length ? `<div class="grid">${items.map(albumCard).join("")}</div>` : "");
 
   mainEl.innerHTML = `
-    <button class="ghost back" data-act="back">← Назад</button>
+    <button class="ghost back" data-act="back">${icon("back")} Назад</button>
     <div class="detail-head artist">
       ${img(a.thumb || avatar(a.name), "cover")}
       <div class="meta">
@@ -296,7 +343,7 @@ function renderCatalogArtist(a, releases) {
   reindex(releases);
   $("#tabs").hidden = true;
   mainEl.innerHTML = `
-    <button class="ghost back" data-act="back">← Назад</button>
+    <button class="ghost back" data-act="back">${icon("back")} Назад</button>
     <div class="detail-head artist">
       ${img(a.thumb || avatar(a.name), "cover")}
       <div class="meta">
@@ -403,10 +450,10 @@ function libRow(t) {
       <div class="alb">${esc(t.album || "")}</div>
       <div class="dur">${dur(t.duration)}</div>
       <div class="act">
-        <button data-lact="play" class="primary">${isPlaying && !audio.paused ? "❚❚" : "▶"}</button>
-        <button data-lact="tags" class="ghost">Теги</button>
-        <button data-lact="reveal" class="ghost">Показати</button>
-        <button data-lact="trash" class="ghost danger">У кошик</button>
+        <button data-lact="play" class="primary iconbtn">${icon(isPlaying && !audio.paused ? "pause" : "play")}</button>
+        <button data-lact="tags" class="ghost">${icon("tag")} Теги</button>
+        <button data-lact="reveal" class="ghost">${icon("reveal")} Показати</button>
+        <button data-lact="trash" class="ghost danger">${icon("trash")} У кошик</button>
       </div>
     </div>`;
 }
@@ -518,7 +565,7 @@ function renderPlaylists() {
       <div class="libhead">
         <h1>${esc(pl.name)}</h1>
         <span class="grow"></span>
-        <button class="primary" data-plact="playall" ${tracks.length ? "" : "disabled"}>▶ Слухати все</button>
+        <button class="primary" data-plact="playall" ${tracks.length ? "" : "disabled"}>${icon("play")} Слухати все</button>
         <button class="ghost" data-plact="rename" data-id="${esc(pl.id)}">Перейменувати</button>
         <button class="ghost danger" data-plact="delete" data-id="${esc(pl.id)}">Видалити</button>
       </div>
@@ -546,13 +593,13 @@ function renderPlaylists() {
             .map(
               (p) => `
       <div class="plcard">
-        <div class="pic">☰</div>
+        <div class="pic">${icon("playlist")}</div>
         <div class="who" data-plact="open" data-id="${esc(p.id)}">
           <b>${esc(p.name)}</b>
           <small>${plural(p.tracks.length, TRACKS)}</small>
         </div>
         <div class="pact">
-          <button class="primary" data-plact="playpl" data-id="${esc(p.id)}" ${p.tracks.length ? "" : "disabled"}>▶</button>
+          <button class="primary iconbtn" data-plact="playpl" data-id="${esc(p.id)}" ${p.tracks.length ? "" : "disabled"}>${icon("play")}</button>
           <button class="ghost" data-plact="rename" data-id="${esc(p.id)}">Перейменувати</button>
           <button class="ghost danger" data-plact="delete" data-id="${esc(p.id)}">Видалити</button>
         </div>
@@ -576,8 +623,8 @@ function plTrackRow(t, plId) {
       <div class="alb">${esc(t.album || "")}</div>
       <div class="dur">${dur(t.duration)}</div>
       <div class="act">
-        <button data-lact="play" class="primary">${isPlaying && !audio.paused ? "❚❚" : "▶"}</button>
-        <button data-plact="drop" data-id="${esc(plId)}" class="ghost">Прибрати</button>
+        <button data-lact="play" class="primary iconbtn">${icon(isPlaying && !audio.paused ? "pause" : "play")}</button>
+        <button data-plact="drop" data-id="${esc(plId)}" class="ghost">${icon("close")} Прибрати</button>
       </div>
     </div>`;
 }
@@ -615,7 +662,7 @@ function renderSettings() {
         <h4>Куди зберігати</h4>
         <p>Сюди складається все завантажене; звідси ж читається Сховище.</p>
         <div class="ctl">
-          <button class="ghost" id="folderBtn" title="${esc(s.outDir)}">📁 <span id="folderName">${esc(s.outDir)}</span></button>
+          <button class="ghost" id="folderBtn" title="${esc(s.outDir)}">${icon("folder")} <span id="folderName">${esc(s.outDir)}</span></button>
         </div>
       </div>
 
@@ -750,7 +797,7 @@ function render() {
       $("#tabs").hidden = true;
       mainEl.innerHTML = `
         <div class="empty">
-          <div class="empty-ico">♫</div>
+          <div class="empty-ico">${icon("note")}</div>
           <h2>Знайди музику</h2>
           <p>Введи назву пісні, альбому чи виконавця — пошук іде одразу по YouTube&nbsp;Music,
              SoundCloud, iTunes і MusicBrainz. Посилання теж працює.</p>
@@ -1104,8 +1151,9 @@ function pushDiscord() {
       title: t.title,
       artist: t.artist,
       album: t.album,
-      // Обкладинку з тегів (data:) Discord не візьме — лише звичайне посилання.
-      image: /^https?:/.test(t.thumb || "") ? t.thumb : null,
+      // Discord бере лише http(s): вшиту в файл картинку (data:) він не покаже.
+      // Для завантажених треків рятує thumbUrl, виведений з тегів файлу.
+      image: t.thumbUrl || (/^https?:/.test(t.thumb || "") ? t.thumb : null),
       duration: Number.isFinite(audio.duration) ? audio.duration : 0,
       position: audio.currentTime,
       paused: audio.paused,
@@ -1125,25 +1173,25 @@ function stopPlayback() {
   $("#plPlay").disabled = true;
   $("#plSeek").disabled = true;
   $("#plTitle").textContent = "Нічого не грає";
-  $("#plArtist").textContent = "Натисни ▶ на треку у Сховищі";
+  $("#plArtist").textContent = "Обери трек у Сховищі або в пошуку";
   $("#plArt").src = BLANK;
 }
 
 function syncPlayBtn() {
-  $("#plPlay").textContent = audio.paused ? "▶" : "❚❚";
+  $("#plPlay").innerHTML = icon(audio.paused ? "play" : "pause");
   syncNavBtns();
   mainEl.querySelectorAll(".row[data-path]").forEach((r) => {
     const on = r.dataset.path === state.playing?.path;
     r.classList.toggle("playing", on);
     const b = r.querySelector('[data-lact="play"]');
-    if (b) b.textContent = on && !audio.paused ? "❚❚" : "▶";
+    if (b) b.innerHTML = icon(on && !audio.paused ? "pause" : "play");
   });
   mainEl.querySelectorAll(".row[data-key]").forEach((r) => {
     const it = index.get(r.dataset.key);
     const on = it && trackKey(it) === trackKey(state.playing);
     r.classList.toggle("playing", Boolean(on));
     const b = r.querySelector('[data-act="listen"]');
-    if (b) b.textContent = on && !audio.paused ? "❚❚" : "▶";
+    if (b) b.innerHTML = icon(on && !audio.paused ? "pause" : "play");
   });
   pushDiscord();
 }
@@ -1366,8 +1414,10 @@ mainEl.addEventListener("change", (e) => {
   if (e.target.id === "discordOn") {
     state.settings.discordEnabled = e.target.checked;
     window.api.setSettings({ discordEnabled: e.target.checked });
+    // Без перевірки на непорожній ID: порожнє поле означає «вшитий у програму»,
+    // і саме так ним користується той, хто нічого не налаштовував.
     if (!e.target.checked) window.api.discordDisconnect().catch(() => {});
-    else if (state.settings.discordAppId) pushDiscord();
+    else pushDiscord();
   }
 });
 
@@ -1515,6 +1565,7 @@ window.api.onClipboardLink((url) => {
 // ------------------------------------------------------------------ старт
 
 (async function init() {
+  paintIcons();
   const s = await window.api.getSettings();
   state.settings = s;
   $$("#sources input").forEach((cb) => (cb.checked = s.sources.includes(cb.value)));
@@ -1539,8 +1590,8 @@ window.api.onClipboardLink((url) => {
   render();
   $("#q").focus();
 
-  // Порожній ID — не помилка: головний процес підставить вшитий у програму.
-  if (s.discordEnabled) window.api.discordConnect(s.discordAppId).catch(() => {});
+  // Навмисно НЕ під'єднуємось на старті: саме́ під'єднання малює в профілі
+  // «грає Music» без жодної пісні. З'єднання встановиться з першим треком.
 
   // Сховище читаємо у фоні: воно потрібне ще й для позначки «вже є» в пошуку.
   loadLibrary();

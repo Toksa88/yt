@@ -13,22 +13,25 @@
     <div class="shell">
       <!-- ---------------------------------------------- ліва панель -->
       <aside class="nav">
-        <div class="brand"><span class="logo">♫</span> Music&nbsp;Grabber</div>
+        <div class="brand">
+          <span class="logo" data-icon="note"></span> Music&nbsp;Grabber
+        </div>
 
         <button class="navbtn active" data-page="search">
-          <span class="nico">⌕</span> Шукач
+          <span class="nico" data-icon="search"></span> Шукач
         </button>
         <button class="navbtn" data-page="queue">
-          <span class="nico">↓</span> Черга <b class="nbadge" id="navQueue" hidden>0</b>
+          <span class="nico" data-icon="download"></span> Черга
+          <b class="nbadge" id="navQueue" hidden>0</b>
         </button>
         <button class="navbtn" data-page="library">
-          <span class="nico">♬</span> Сховище
+          <span class="nico" data-icon="library"></span> Сховище
         </button>
         <button class="navbtn" data-page="playlists">
-          <span class="nico">☰</span> Плейлисти
+          <span class="nico" data-icon="playlist"></span> Плейлисти
         </button>
         <button class="navbtn" data-page="settings">
-          <span class="nico">⚙</span> Налаштування
+          <span class="nico" data-icon="settings"></span> Налаштування
         </button>
 
         <div class="navfoot">
@@ -44,12 +47,12 @@
         <div class="toast" id="toast" hidden>
           <span id="toastText"></span>
           <span class="tacts" id="toastActs"></span>
-          <button class="tclose" id="toastClose">✕</button>
+          <button class="tclose" id="toastClose" data-icon="close" title="Сховати"></button>
         </div>
 
         <header class="topbar" id="topbar">
           <form class="searchbox" id="searchForm" autocomplete="off">
-            <span class="sico">⌕</span>
+            <span class="sico" data-icon="search"></span>
             <input
               id="q"
               type="text"
@@ -86,16 +89,16 @@
       <img class="part" id="plArt" alt="" />
       <div class="pinfo">
         <b id="plTitle">Нічого не грає</b>
-        <small id="plArtist">Натисни ▶ на треку у Сховищі</small>
+        <small id="plArtist">Обери трек у Сховищі або в пошуку</small>
       </div>
-      <button class="pbtn" id="plPrev" title="Попередній" disabled>⏮</button>
-      <button class="pbtn big" id="plPlay" title="Грати / пауза" disabled>▶</button>
-      <button class="pbtn" id="plNext" title="Наступний" disabled>⏭</button>
+      <button class="pbtn" id="plPrev" title="Попередній" data-icon="prev" disabled></button>
+      <button class="pbtn big" id="plPlay" title="Грати / пауза" data-icon="play" disabled></button>
+      <button class="pbtn" id="plNext" title="Наступний" data-icon="next" disabled></button>
       <div class="pseek">
         <input type="range" id="plSeek" min="0" max="1000" value="0" disabled />
         <span class="ptime"><span id="plNow">0:00</span> / <span id="plEnd">0:00</span></span>
       </div>
-      <span class="vico">🔊</span>
+      <span class="vico" data-icon="volume"></span>
       <input type="range" id="plVol" class="pvol" min="0" max="100" value="80" />
       <audio id="audio"></audio>
     </div>

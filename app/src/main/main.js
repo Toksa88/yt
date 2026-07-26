@@ -235,9 +235,19 @@ handle("discord:disconnect", () => {
 handle("discord:status", () => ({ connected: discord.connected }));
 handle("discord:activity", (track) => {
   const s = settings.load();
-  if (!s.discordEnabled) return false;
-  // Підключаємось ліниво: якщо Discord запустили вже після нашої програми,
-  // перше ж відтворення саме встановить з'єднання.
+
+  // Саме́ по собі під'єднання до Discord уже малює в профілі голе
+  // «грає ‹назва додатка›» — ще до будь-якого статусу. Тому коли нічого не
+  // грає, ми не просто знімаємо статус, а розриваємо з'єднання: інакше
+  // в профілі назавжди висить назва програми без жодної пісні.
+  if (!track || !s.discordEnabled) {
+    discord.setActivity(null);
+    discord.disconnect();
+    return false;
+  }
+
+  // Підключаємось ліниво — тоді Discord, запущений уже після нашої програми,
+  // все одно підхопиться з першим же треком.
   const id = settings.discordAppId(s);
   if (!discord.connected && id) discord.connect(id).catch(() => {});
   return discord.setActivity(track);

@@ -103,6 +103,25 @@ input[type="checkbox"] {
   accent-color: var(--accent);
 }
 
+/* Іконки — SVG, а не емодзі: успадковують колір тексту й однаково виглядають
+   на будь-якій системі. 1em, щоб масштабувались разом зі шрифтом поруч. */
+.ic {
+  width: 1.15em;
+  height: 1.15em;
+  flex: 0 0 auto;
+  vertical-align: -0.22em;
+}
+button .ic {
+  margin-right: 6px;
+}
+button.iconbtn {
+  padding: 6px 10px;
+}
+button.iconbtn .ic {
+  margin: 0;
+  vertical-align: -0.2em;
+}
+
 /* ============================================================ каркас */
 
 .shell {
@@ -137,7 +156,11 @@ input[type="checkbox"] {
   border-radius: 8px;
   background: linear-gradient(135deg, var(--accent), #ff6ec7);
   vertical-align: -7px;
-  font-size: 15px;
+}
+.logo .ic {
+  width: 16px;
+  height: 16px;
+  vertical-align: 0;
 }
 
 .navbtn {
@@ -165,8 +188,16 @@ input[type="checkbox"] {
   display: inline-grid;
   place-items: center;
   width: 20px;
-  font-size: 15px;
-  opacity: 0.9;
+  opacity: 0.85;
+}
+.nico .ic {
+  width: 18px;
+  height: 18px;
+  vertical-align: 0;
+}
+.navbtn.active .nico {
+  opacity: 1;
+  color: var(--accent-2);
 }
 .nbadge {
   margin-left: auto;
@@ -213,12 +244,17 @@ input[type="checkbox"] {
 }
 .sico {
   position: absolute;
-  left: 16px;
+  left: 15px;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 20px;
+  display: grid;
   color: var(--muted);
   pointer-events: none;
+}
+.sico .ic {
+  width: 19px;
+  height: 19px;
+  vertical-align: 0;
 }
 .searchbox input {
   flex: 1 1 auto;
@@ -347,8 +383,13 @@ h1.page {
   color: var(--muted);
 }
 .empty-ico {
-  font-size: 54px;
-  opacity: 0.32;
+  opacity: 0.28;
+}
+.empty-ico .ic {
+  width: 54px;
+  height: 54px;
+  stroke-width: 1.2;
+  vertical-align: 0;
 }
 .empty h2 {
   margin: 6px 0 0;
@@ -860,12 +901,27 @@ h3.sec {
   white-space: nowrap;
 }
 .pbtn {
-  width: 40px;
-  height: 40px;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
   padding: 0;
-  font-size: 15px;
   flex: 0 0 auto;
+}
+.pbtn .ic {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  vertical-align: 0;
+}
+.pbtn.big {
+  width: 44px;
+  height: 44px;
+}
+.pbtn.big .ic {
+  width: 20px;
+  height: 20px;
 }
 .pbtn.big {
   background: var(--accent);
@@ -888,9 +944,6 @@ h3.sec {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-.vico {
-  color: var(--muted);
 }
 .pvol {
   width: 96px;
@@ -946,8 +999,12 @@ h3.sec {
   height: 46px;
   border-radius: 9px;
   background: linear-gradient(135deg, var(--accent), #ff6ec7);
-  font-size: 20px;
   flex: 0 0 auto;
+}
+.plcard .pic .ic {
+  width: 22px;
+  height: 22px;
+  vertical-align: 0;
 }
 .plcard .who {
   flex: 1 1 auto;
@@ -1076,9 +1133,22 @@ h3.sec {
   font-size: 12.5px;
 }
 .tclose {
+  display: grid;
+  place-items: center;
   background: transparent;
-  padding: 2px 6px !important;
+  padding: 5px !important;
   color: var(--muted);
+}
+.tclose .ic {
+  margin: 0;
+  vertical-align: 0;
+}
+.vico {
+  display: grid;
+  color: var(--muted);
+}
+.vico .ic {
+  vertical-align: 0;
 }
 
 /* прокрутка */
