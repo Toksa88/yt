@@ -91,6 +91,8 @@ function keyOf(it) {
 
 const SRC_NAME = {
   ytmusic: "YT Music",
+  youtube: "YouTube",
+  local: "з диска",
   soundcloud: "SoundCloud",
   itunes: "iTunes",
   musicbrainz: "MusicBrainz",
@@ -300,6 +302,7 @@ function songRow(s) {
       <div class="act">
         ${dead ? "" : `<button data-act="listen" class="ghost iconbtn" title="Послухати не завантажуючи">${icon("play")}</button>`}
         ${favBtn(s)}
+        ${dead ? "" : `<button data-act="toplaylist" class="ghost iconbtn" title="У плейлист">${icon("plus")}</button>`}
         ${s.source === "ytmusic" ? `<button data-act="radio" class="ghost iconbtn" title="Радіо за цим треком">${icon("radio")}</button>` : ""}
         ${dead ? "" : `<button data-act="dl-one" class="primary">ЗАБИРАЮ!</button>`}
       </div>
@@ -742,11 +745,17 @@ async function startRadio(track) {
 
 // ------------------------------------------------------------------ сторінка «Плейлисти»
 
-/** Плейлист зберігає шляхи; самі треки беремо зі Сховища. */
+/**
+ * Треки плейлиста. Для локальних файлів беремо свіжий запис зі Сховища —
+ * там актуальні теги, тривалість і обкладинка; для мережевих лишаємо те,
+ * що збережено. Файл, якого зараз немає на диску, не викидаємо: диск могли
+ * просто від'єднати.
+ */
 function plTracks(pl) {
-  return (pl?.tracks || [])
-    .map((p) => state.library.tracks.find((t) => t.path === p))
-    .filter(Boolean);
+  return (pl?.tracks || []).map((t) => {
+    if (!t.path) return t;
+    return state.library.tracks.find((x) => x.path === t.path) || { ...t, missing: true };
+  });
 }
 
 function renderPlaylists() {
@@ -815,19 +824,27 @@ function renderPlaylists() {
 }
 
 function plTrackRow(t, plId) {
-  const isPlaying = state.playing?.path === t.path;
+  const key = trackKey(t) || t.key;
+  const isPlaying = trackKey(state.playing) === key;
+  const cover = t.path
+    ? img(null, "art", `data-cover="${esc(t.path)}"`)
+    : img(t.thumb, "art");
   return `
-    <div class="row${isPlaying ? " playing" : ""}" data-path="${esc(t.path)}">
+    <div class="row${isPlaying ? " playing" : ""}${t.missing ? " dim" : ""}" data-pkey="${esc(key)}">
       <span></span>
-      ${img(null, "art", `data-cover="${esc(t.path)}"`)}
+      ${cover}
       <div class="name">
-        <b>${esc(t.title)}</b>
+        <b>${esc(t.title)}${
+          t.path
+            ? ""
+            : `<span class="badge ${esc(t.source || "ytmusic")}">${esc(SRC_NAME[t.source] || "потік")}</span>`
+        }${t.missing ? `<span class="badge miss">файлу немає</span>` : ""}</b>
         <span class="sub">${esc(t.artist || "невідомий виконавець")}</span>
       </div>
       <div class="alb">${esc(t.album || "")}</div>
       <div class="dur">${dur(t.duration)}</div>
       <div class="act">
-        <button data-lact="play" class="primary iconbtn">${icon(isPlaying && !audio.paused ? "pause" : "play")}</button>
+        <button data-plact="plplay" class="primary iconbtn">${icon(isPlaying && !audio.paused ? "pause" : "play")}</button>
         <button data-plact="drop" data-id="${esc(plId)}" class="ghost">${icon("close")} Прибрати</button>
       </div>
     </div>`;
@@ -837,9 +854,11 @@ async function loadPlaylists() {
   state.playlists = await window.api.plList();
 }
 
-function openPlModal(paths) {
-  if (!paths.length) return;
-  $("#plModalCount").textContent = `Обрано ${plural(paths.length, TRACKS)}`;
+/** @param {object[]} tracks локальні файли або треки з пошуку — байдуже які */
+function openPlModal(tracks) {
+  tracks = (tracks || []).filter(Boolean);
+  if (!tracks.length) return;
+  $("#plModalCount").textContent = `Обрано ${plural(tracks.length, TRACKS)}`;
   $("#plModalList").innerHTML = state.playlists.length
     ? state.playlists
         .map(
@@ -850,7 +869,7 @@ function openPlModal(paths) {
     : `<div class="mnote">Плейлистів ще немає — створи нижче.</div>`;
   $("#plNewName").value = "";
   $("#plModal").hidden = false;
-  $("#plModal").dataset.paths = JSON.stringify(paths);
+  $("#plModal").dataset.tracks = JSON.stringify(tracks);
 }
 
 // ------------------------------------------------------------------ сторінка «Налаштування»
@@ -1692,6 +1711,7 @@ mainEl.addEventListener("click", (e) => {
       const queue = (state.results[state.tab] || []).filter((s) => s.kind === "song" && s.url);
       return play(it, queue.length ? queue : undefined);
     }
+    if (act === "toplaylist") return openPlModal([index.get(rowKey)]);
     if (act === "radio") return startRadio(index.get(rowKey));
     if (act === "dl-one") return enqueue([index.get(rowKey)]);
     if (act === "dl-album") return enqueue([index.get(btn.dataset.key)]);
@@ -1726,7 +1746,7 @@ mainEl.addEventListener("click", (e) => {
       refreshSelbar();
       return;
     }
-    if (lb.dataset.lact === "toplaylist") return openPlModal([p]);
+    if (lb.dataset.lact === "toplaylist") return openPlModal([track]);
     if (lb.dataset.lact === "tags") return openTagEditor([p]);
     if (lb.dataset.lact === "play") {
       // Черга — увесь видимий список, щоб працювали ⏭ і автоперехід.
@@ -1848,11 +1868,18 @@ mainEl.addEventListener("click", (e) => {
       });
     }
     if (act === "drop") {
-      const p = pb.closest("[data-path]")?.dataset.path;
-      return window.api.plRemoveTrack(id, p).then((list) => {
+      const key = pb.closest("[data-pkey]")?.dataset.pkey;
+      return window.api.plRemoveTrack(id, key).then((list) => {
         state.playlists = list;
         render();
       });
+    }
+    if (act === "plplay") {
+      const key = pb.closest("[data-pkey]")?.dataset.pkey;
+      const list = plTracks(state.playlists.find((p) => p.id === state.openPl));
+      const t = list.find((x) => (trackKey(x) || x.key) === key);
+      if (t && !t.missing) play(t, list.filter((x) => !x.missing));
+      return;
     }
     if (act === "playall" || act === "playpl") {
       const pl = state.playlists.find((p) => p.id === (id || state.openPl));
@@ -1988,17 +2015,19 @@ $("#selNone").addEventListener("click", () => {
 });
 
 $("#selTags").addEventListener("click", () => openTagEditor([...state.libPicked]));
-$("#selPl").addEventListener("click", () => openPlModal([...state.libPicked]));
+$("#selPl").addEventListener("click", () =>
+  openPlModal([...state.libPicked].map((p) => state.library.tracks.find((t) => t.path === p))),
+);
 
 $("#plCancel").addEventListener("click", () => ($("#plModal").hidden = true));
 $("#plModal").addEventListener("click", async (e) => {
   if (e.target.id === "plModal") return ($("#plModal").hidden = true);
   const row = e.target.closest("[data-pladd]");
   if (!row) return;
-  const paths = JSON.parse($("#plModal").dataset.paths || "[]");
-  state.playlists = await window.api.plAdd(row.dataset.pladd, paths);
+  const tracks = JSON.parse($("#plModal").dataset.tracks || "[]");
+  state.playlists = await window.api.plAdd(row.dataset.pladd, tracks);
   $("#plModal").hidden = true;
-  toast(`Додано в плейлист: ${plural(paths.length, TRACKS)}`, [], 3500);
+  toast(`Додано в плейлист: ${plural(tracks.length, TRACKS)}`, [], 3500);
 });
 $("#plCreateAdd").addEventListener("click", async () => {
   const name = $("#plNewName").value.trim();
@@ -2006,11 +2035,11 @@ $("#plCreateAdd").addEventListener("click", async () => {
     $("#plNewName").focus();
     return;
   }
-  const paths = JSON.parse($("#plModal").dataset.paths || "[]");
+  const tracks = JSON.parse($("#plModal").dataset.tracks || "[]");
   const list = await window.api.plCreate(name);
-  state.playlists = await window.api.plAdd(list[0].id, paths);
+  state.playlists = await window.api.plAdd(list[0].id, tracks);
   $("#plModal").hidden = true;
-  toast(`Створено «${name}» — ${plural(paths.length, TRACKS)}`, [], 3500);
+  toast(`Створено «${name}» — ${plural(tracks.length, TRACKS)}`, [], 3500);
 });
 $("#tagCancel").addEventListener("click", () => ($("#tagModal").hidden = true));
 $("#tagSave").addEventListener("click", saveTags);

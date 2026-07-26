@@ -193,6 +193,27 @@ function ytAlbum(a) {
   };
 }
 
+/**
+ * Звичайне відео з YouTube — концерти, кавери, рідкісні завантаження, тобто
+ * все те, чого немає в каталозі YouTube Music. Формат тут інший: artist
+ * може бути об'єктом або рядком, а thumbnails — під тим самим ключем.
+ */
+function ytVideo(v) {
+  return {
+    kind: "song",
+    source: "youtube",
+    id: v.videoId,
+    url: `https://www.youtube.com/watch?v=${v.videoId}`,
+    title: v.name || v.title || "?",
+    artist: v.artist?.name || (typeof v.artists === "string" ? v.artists : "") || "",
+    artistId: v.artist?.artistId || null,
+    album: "",
+    albumId: null,
+    duration: secs(v.duration) ?? mmss(v.duration),
+    thumb: biggestThumb(v.thumbnails) || v.thumbnail || null,
+  };
+}
+
 function ytArtist(a) {
   return {
     kind: "artist",
@@ -605,6 +626,9 @@ async function searchAll(query, sources, searchId) {
     ytSongs: use("ytmusic") ? ytm().then((y) => y.searchSongs(query)) : null,
     ytAlbums: use("ytmusic") ? ytm().then((y) => y.searchAlbums(query)) : null,
     ytArtists: use("ytmusic") ? ytm().then((y) => y.searchArtists(query)) : null,
+    // Звичайний YouTube — окремим джерелом: там є концерти, кавери й рідкісні
+    // завантаження, яких немає в каталозі YouTube Music.
+    ytVideos: use("youtube") ? ytm().then((y) => y.searchVideos(query)) : null,
     sc: use("soundcloud") ? soundcloud(query, 15, searchId) : null,
     it: use("itunes") ? itunesAlbums(query, 12, searchId) : null,
     mb: use("musicbrainz") ? musicbrainzArtists(query, 8, searchId) : null,
@@ -632,7 +656,11 @@ async function searchAll(query, sources, searchId) {
     }
   });
 
-  const songs = [...(got.ytSongs || []).map(ytSong), ...(got.sc || [])];
+  const songs = [
+    ...(got.ytSongs || []).map(ytSong),
+    ...(got.ytVideos || []).filter((v) => v.videoId).map(ytVideo),
+    ...(got.sc || []),
+  ];
 
   // Альбом, що є і в YouTube Music, і в iTunes, показуємо один раз —
   // лишаємо версію з YouTube Music, бо тільки її можна одразу завантажити.

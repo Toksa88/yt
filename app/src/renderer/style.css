@@ -555,6 +555,14 @@ h3.sec {
   background: #ff000026;
   color: #ff8080;
 }
+.badge.youtube {
+  background: #ff000033;
+  color: #ff9d9d;
+}
+.badge.local {
+  background: #3ecf8e26;
+  color: var(--ok);
+}
 .badge.soundcloud {
   background: #ff550026;
   color: #ff9a5c;

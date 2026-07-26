@@ -133,4 +133,4 @@ function historyClear() {
   return save().history;
 }
 
-module.exports = { favorites, favToggle, history, historyAdd, historyClear, repath, keyOf };
+module.exports = { favorites, favToggle, history, historyAdd, historyClear, repath, keyOf, slim };

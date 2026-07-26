@@ -280,6 +280,12 @@ function connect(url) {
       const n = document.querySelector('.row .name');
       return getComputedStyle(b).display === 'inline-block'
           && b.getBoundingClientRect().width < n.getBoundingClientRect().width / 2;`)) === true);
+    // Звичайний YouTube окремим джерелом: концерти, кавери й рідкісні
+    // завантаження в каталог YouTube Music не потрапляють.
+    check("джерело YouTube є в перемикачах",
+      (await evalJs(`return !!document.querySelector('#sources input[value=youtube]')`)) === true);
+    check("є результати зі звичайного YouTube", (await evalJs(`
+      return state.results.songs.filter(s => s.source === 'youtube').length;`)) > 0);
     await shot("треки");
 
     console.log("\n[3] Вибір треків");
@@ -680,8 +686,10 @@ function connect(url) {
         .querySelector('[data-plact=open]').click();
       return true;`);
     await sleep(400);
+    // data-pkey, а не data-path: у плейлисті тепер бувають і мережеві треки,
+    // у яких шляху до файлу немає взагалі.
     check("всередині плейлиста видно трек",
-      (await evalJs("return document.querySelectorAll('.row[data-path]').length")) === 1);
+      (await evalJs("return document.querySelectorAll('.row[data-pkey]').length")) === 1);
     await shot("плейлист");
 
     // Кнопка «Створити плейлист» на самій сторінці — та, що мовчала через prompt.
@@ -721,11 +729,57 @@ function connect(url) {
       state.playlists = await window.api.plList();
       return true;`);
 
+    // Головне: у плейлист має лягати й те, що ще НЕ завантажене. Спершу тут
+    // зберігались самі шляхи до файлів, і мережевий трек покласти було нікуди.
+    console.log("\n[11c2] Незавантажений трек у плейлисті");
+    await evalJs(`
+      document.querySelector('.navbtn[data-page=search]').click();
+      document.querySelector('#q').value = 'Kevin MacLeod Cipher';
+      document.querySelector('#searchForm').dispatchEvent(new Event('submit', {cancelable:true}));
+      return true;`);
+    await until(`
+      if (document.querySelector('.spinner')) return null;
+      return document.querySelector('.row [data-act=toplaylist]') ? true : null;`, 40, 1000);
+
+    check("кнопка «у плейлист» є в результатах пошуку", true);
+    await evalJs(`document.querySelector('.row [data-act=toplaylist]').click(); return true`);
+    await sleep(400);
+    const netTrack = await evalJs(`
+      const t = JSON.parse(document.querySelector('#plModal').dataset.tracks || '[]')[0];
+      return t ? { hasUrl: !!t.url, hasPath: !!t.path, title: t.title } : null;`);
+    check("це справді мережевий трек, а не файл",
+      netTrack?.hasUrl === true && netTrack?.hasPath !== true, netTrack?.title || "нема");
+
+    await evalJs(`
+      document.querySelector('#plNewName').value = ${JSON.stringify(PL_NAME + " мережа")};
+      document.querySelector('#plCreateAdd').click();
+      return true;`);
+    const netPl = await until(`
+      const p = state.playlists.find(p => p.name === ${JSON.stringify(PL_NAME + " мережа")});
+      return p && p.tracks.length ? { n: p.tracks.length, url: !!p.tracks[0].url } : null;`, 20, 400);
+    check("незавантажений трек ліг у плейлист", netPl?.n === 1, netPl ? "" : "не ліг");
+    check("у плейлисті збереглось посилання", netPl?.url === true);
+
+    await evalJs(`document.querySelector('.navbtn[data-page=playlists]').click(); return true`);
+    await until(`return document.querySelector('.plcard') ? true : null`, 20, 400);
+    await evalJs(`
+      [...document.querySelectorAll('.plcard')]
+        .find(c => c.textContent.includes(${JSON.stringify(PL_NAME + " мережа")}))
+        .querySelector('[data-plact=open]').click();
+      return true;`);
+    await sleep(500);
+    check("трек видно всередині плейлиста",
+      (await evalJs("return document.querySelectorAll('.row[data-pkey]').length")) === 1);
+    check("він позначений як потоковий",
+      (await evalJs(`return !!document.querySelector('.row[data-pkey] .badge')`)) === true);
+    await shot("плейлист-із-потоком");
+
     const left = await evalJs(`
       for (const p of await window.api.plList()) {
-        if (p.name === ${JSON.stringify(PL_NAME)}) await window.api.plRemove(p.id);
+        if (p.name.startsWith(${JSON.stringify(PL_NAME)})) await window.api.plRemove(p.id);
       }
-      return (await window.api.plList()).filter(p => p.name === ${JSON.stringify(PL_NAME)}).length;`);
+      state.playlists = await window.api.plList();
+      return state.playlists.filter(p => p.name.startsWith(${JSON.stringify(PL_NAME)})).length;`);
     check("тест прибрав за собою", left === 0);
 
     console.log("\n[11d] Discord");

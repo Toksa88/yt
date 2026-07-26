@@ -24,7 +24,13 @@ const DEFAULTS = {
   // без перекодування. MP3 доступний у налаштуваннях для старих плеєрів
   // і магнітол, але він завжди означає ще одне стиснення поверх стиснутого.
   format: "m4a",
-  sources: ["ytmusic", "soundcloud", "itunes", "musicbrainz"],
+  sources: ["ytmusic", "youtube", "soundcloud", "itunes", "musicbrainz"],
+  /**
+   * Джерела, які користувач уже бачив. Потрібні, щоб відрізнити «вимкнув
+   * свідомо» від «з'явилось у новій версії»: без цього нове джерело мовчки
+   * лишалося б вимкненим у всіх, хто вже колись запускав програму.
+   */
+  knownSources: [],
   watchClipboard: true,
   volume: 0.8,
   shuffle: false,
@@ -53,6 +59,21 @@ function load() {
   }
   cache = { ...DEFAULTS, ...saved };
   if (!cache.outDir) cache.outDir = path.join(app.getPath("music"), "Завантажено");
+
+  // Джерело, додане в новій версії, вмикаємо один раз — далі рішення за
+  // користувачем. Порожній knownSources означає налаштування зі старої
+  // версії: там усе, що було на той момент, вважаємо баченим.
+  const known = new Set(cache.knownSources?.length ? cache.knownSources : cache.sources);
+  let changed = false;
+  for (const s of DEFAULTS.sources) {
+    if (known.has(s)) continue;
+    known.add(s);
+    if (!cache.sources.includes(s)) cache.sources.push(s);
+    changed = true;
+  }
+  cache.knownSources = [...known];
+  if (changed) save({});
+
   return cache;
 }
 
