@@ -1,23 +1,72 @@
 {
   "name": "music-grabber",
   "version": "1.0.0",
-  "description": "Пошук і завантаження музики з YouTube Music, SoundCloud та Bandcamp",
+  "description": "Пошук, прослуховування й завантаження музики з YouTube Music, YouTube та SoundCloud",
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder --win",
+    "release": "electron-builder --win --publish always",
     "test": "node test/download.test.js && node test/ui.test.js",
     "test:download": "node test/download.test.js",
     "test:ui": "node test/ui.test.js"
   },
-  "author": "",
+  "author": "Toksa88",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Toksa88/yt.git"
+  },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "music-metadata": "^11.14.0",
     "ytmusic-api": "^5.3.0"
   },
   "devDependencies": {
     "electron": "^33.0.0",
     "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.toksa88.musicgrabber",
+    "productName": "Music Grabber",
+    "copyright": "Copyright (c) 2026 Toksa88",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build-assets"
+    },
+    "files": [
+      "src/**/*",
+      "!**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "bin",
+        "to": "bin",
+        "filter": [
+          "**/*.exe"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "${productName}-${version}-setup.${ext}",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Music Grabber",
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": [
+      {
+        "provider": "github"
+      }
+    ]
   }
 }

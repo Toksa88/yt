@@ -1014,7 +1014,20 @@ function renderSettings() {
       </div>
 
       <div class="set" id="binSet"></div>
+      <div class="set">
+        <h4>Версія</h4>
+        <p>Оновлення завантажується саме, коли з'явиться нове; програма запропонує перезапуск.</p>
+        <div class="ctl"><span id="appVer">…</span></div>
+      </div>
     </div>`;
+
+  window.api
+    .version()
+    .then((v) => {
+      const el = $("#appVer");
+      if (el) el.innerHTML = `Music Grabber <code>${esc(v)}</code>`;
+    })
+    .catch(() => {});
 
   window.api.binaries().then((b) => {
     const el = $("#binSet");
@@ -2171,6 +2184,20 @@ window.api.onDlUpdate((job) => {
 
   // Завантажене одразу має з'явитись у Сховищі й позначитись у пошуку.
   if (job.status === "done" && was?.status !== "done") loadLibrary(true);
+});
+
+// Оновлення качається саме собою; людині показуємо лише готовий результат,
+// щоб не смикати її повідомленнями посеред прослуховування.
+window.api.onUpdateState((s) => {
+  if (s?.state !== "ready") return;
+  toast(
+    `Готове оновлення${s.version ? ` до версії ${s.version}` : ""}.`,
+    [
+      { label: "Перезапустити", primary: true, run: () => window.api.installUpdate() },
+      { label: "Пізніше", run: hideToast },
+    ],
+    0,
+  );
 });
 
 window.api.onClipboardLink((url) => {

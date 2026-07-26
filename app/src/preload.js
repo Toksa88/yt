@@ -38,6 +38,10 @@ contextBridge.exposeInMainWorld("api", {
 
   onClipboardLink: (cb) => ipcRenderer.on("clipboard:link", (_e, url) => cb(url)),
 
+  version: () => call("app:version"),
+  onUpdateState: (cb) => ipcRenderer.on("update:state", (_e, s) => cb(s)),
+  installUpdate: () => ipcRenderer.invoke("update:install"),
+
   streamUrl: (url, force) => call("stream:url", url, force),
 
   radio: (videoId) => call("reco:radio", videoId),

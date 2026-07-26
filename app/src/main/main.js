@@ -287,6 +287,50 @@ downloads.bus.on("update", (job) => {
   if (win && !win.isDestroyed()) win.webContents.send("dl:update", job);
 });
 
+// ------------------------------------------------------------------ оновлення
+
+/**
+ * Тихе оновлення через GitHub Releases.
+ *
+ * Працює лише у встановленій програмі: під час розробки оновлювати нічого,
+ * та й версія тут завжди «остання». Помилки навмисно не показуємо вікном —
+ * якщо релізів ще немає або немає інтернету, це не проблема користувача.
+ */
+function setupUpdates() {
+  if (!app.isPackaged) return;
+
+  let updater;
+  try {
+    updater = require("electron-updater").autoUpdater;
+  } catch {
+    return; // зібрано без оновлювача — просто працюємо далі
+  }
+
+  updater.autoDownload = true;
+  updater.autoInstallOnAppQuit = true;
+  updater.logger = null;
+
+  const tell = (msg) => {
+    if (win && !win.isDestroyed()) win.webContents.send("update:state", msg);
+  };
+
+  updater.on("update-available", (i) => tell({ state: "downloading", version: i?.version }));
+  updater.on("download-progress", (p) => tell({ state: "downloading", percent: Math.round(p.percent) }));
+  updater.on("update-downloaded", (i) => tell({ state: "ready", version: i?.version }));
+  updater.on("error", () => {}); // мовчки: нема релізів або нема мережі
+
+  updater.checkForUpdates().catch(() => {});
+  // Раз на шість годин — цього досить для програми, яку тримають відкритою.
+  setInterval(() => updater.checkForUpdates().catch(() => {}), 6 * 60 * 60 * 1000);
+
+  ipcMain.handle("update:install", () => {
+    updater.quitAndInstall();
+    return true;
+  });
+}
+
+handle("app:version", () => app.getVersion());
+
 // ------------------------------------------------------------------ буфер обміну
 
 const MUSIC_LINK =
@@ -336,6 +380,7 @@ if (!app.requestSingleInstanceLock()) {
     buildMenu();
     createWindow();
     watchClipboard();
+    setupUpdates();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
