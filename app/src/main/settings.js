@@ -16,7 +16,7 @@ const FILE = () => path.join(app.getPath("userData"), "settings.json");
  * налаштовує — його Discord підхопить цю ж назву додатка. Поле в
  * налаштуваннях лишається, щоб можна було підставити свій.
  */
-const BUILTIN_DISCORD_APP_ID = "";
+const BUILTIN_DISCORD_APP_ID = "1530859162131759224";
 
 const DEFAULTS = {
   outDir: "",

@@ -490,16 +490,22 @@ function connect(url) {
       return (t && t !== 'Підключаюсь…') ? t : null;`, 20, 500);
     // Discord справді запущено, канал знайдено, кадр прийнято — і клієнт
     // чесно відповів, що такого додатка немає. Це і є доказ роботи протоколу.
-    check("Discord відповідає на наш запит", /Application ID/.test(dmsg || ""), dmsg || "мовчить");
+    check("хибний ID чесно відхиляється", /Application ID/.test(dmsg || ""), dmsg || "мовчить");
 
-    // Порожнє поле має означати «взяти вшитий у програму ID», а не «вимкнути»:
-    // саме від цього залежить, чи запрацює статус у друга, який нічого не
-    // налаштовував. Вшитого ID поки немає, тому очікуємо саме таке пояснення.
+    // Головне для роздачі друзям: людина нічого не вводила — має працювати
+    // вшитий у програму ID, а не вискочити помилка формату.
     const empty = await evalJs(`
-      try { await window.api.discordConnect(''); return 'підключився'; }
+      try { await window.api.discordConnect(''); return 'ok'; }
       catch (e) { return e.message; }`);
-    check("порожнє поле веде до вшитого ID, а не до помилки формату",
-      !/17–25 цифр/.test(empty || ""), (empty || "").slice(0, 80));
+    check("порожнє поле бере вшитий ID і підключається", empty === "ok", empty || "");
+
+    const act = await evalJs(`
+      return await window.api.discordActivity({
+        title: 'Cipher', artist: 'Kevin MacLeod', album: 'Light Electronic',
+        duration: 231, position: 5, paused: false });`);
+    // false тут означає лише «галочку не ввімкнено» — це теж правильна поведінка.
+    check("статус приймається без помилок", act === true || act === false, `повернуто ${act}`);
+    await evalJs(`await window.api.discordDisconnect(); return true;`);
 
     console.log("\n[12] Налаштування");
     await evalJs(`document.querySelector('.navbtn[data-page=settings]').click(); return true`);
