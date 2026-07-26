@@ -492,6 +492,15 @@ function connect(url) {
     // чесно відповів, що такого додатка немає. Це і є доказ роботи протоколу.
     check("Discord відповідає на наш запит", /Application ID/.test(dmsg || ""), dmsg || "мовчить");
 
+    // Порожнє поле має означати «взяти вшитий у програму ID», а не «вимкнути»:
+    // саме від цього залежить, чи запрацює статус у друга, який нічого не
+    // налаштовував. Вшитого ID поки немає, тому очікуємо саме таке пояснення.
+    const empty = await evalJs(`
+      try { await window.api.discordConnect(''); return 'підключився'; }
+      catch (e) { return e.message; }`);
+    check("порожнє поле веде до вшитого ID, а не до помилки формату",
+      !/17–25 цифр/.test(empty || ""), (empty || "").slice(0, 80));
+
     console.log("\n[12] Налаштування");
     await evalJs(`document.querySelector('.navbtn[data-page=settings]').click(); return true`);
     await sleep(600);

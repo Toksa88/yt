@@ -6,6 +6,18 @@ const { app } = require("electron");
 
 const FILE = () => path.join(app.getPath("userData"), "settings.json");
 
+/**
+ * ID додатка Discord, вшитий у програму.
+ *
+ * Це НЕ секрет: Discord показує його в кожному статусі, який бачать усі
+ * навколо. Секретним є Client Secret, і він тут не потрібен взагалі.
+ *
+ * Саме тому ID один на всіх: той, хто просто запустив програму, нічого не
+ * налаштовує — його Discord підхопить цю ж назву додатка. Поле в
+ * налаштуваннях лишається, щоб можна було підставити свій.
+ */
+const BUILTIN_DISCORD_APP_ID = "";
+
 const DEFAULTS = {
   outDir: "",
   // «Як є»: m4a — це рідний формат YouTube, ffmpeg лише перекладає контейнер
@@ -17,10 +29,15 @@ const DEFAULTS = {
   volume: 0.8,
   // Альбом кладеться в окрему теку — інакше десяток треків тоне в колекції.
   albumFolder: true,
-  // Discord показує назву ЗАРЕЄСТРОВАНОГО додатка, тому ID мусить бути свій.
+  // Discord показує назву ЗАРЕЄСТРОВАНОГО додатка, а не заголовок нашого вікна.
   discordEnabled: false,
   discordAppId: "",
 };
+
+/** Порожнє поле означає «взяти вшитий ID», а не «вимкнути». */
+function discordAppId(s) {
+  return String(s.discordAppId || "").trim() || BUILTIN_DISCORD_APP_ID;
+}
 
 let cache = null;
 
@@ -48,4 +65,4 @@ function save(patch) {
   return cache;
 }
 
-module.exports = { load, save };
+module.exports = { load, save, discordAppId, BUILTIN_DISCORD_APP_ID };

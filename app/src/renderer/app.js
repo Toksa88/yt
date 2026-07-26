@@ -655,12 +655,20 @@ function renderSettings() {
       <div class="set">
         <h4>Показувати в Discord, що слухаєш</h4>
         <p>
-          Discord показує назву <b>зареєстрованого додатка</b>, а не заголовок нашого вікна,
-          тому потрібен власний ID. Це безкоштовно й на дві хвилини:
-          відкрий <b>discord.com/developers/applications</b> → <b>New Application</b> →
-          назви його як хочеш (саме цю назву й побачать друзі) → на вкладці
-          <b>General Information</b> скопіюй <b>Application ID</b> і встав сюди.
-          Discord має бути запущений.
+          Discord показує назву <b>зареєстрованого додатка</b>, а не заголовок нашого вікна.
+          ID такого додатка вшитий у програму, тому тому, хто просто нею користується,
+          нічого налаштовувати не треба — досить увімкнути галочку. Поле нижче потрібне,
+          лише якщо хочеш підставити свій додаток з іншою назвою.
+        </p>
+        <p>
+          Свій ID береться так: <b>discord.com/developers/applications</b> →
+          <b>New Application</b> → назви як хочеш (саме цю назву побачать друзі) →
+          вкладка <b>General Information</b> → <b>Application ID</b>.
+          Це не таємниця: Discord показує цей ID у кожному статусі.
+        </p>
+        <p>
+          Щоб статус було видно, у самому Discord має бути ввімкнено показ активності
+          (Налаштування → Приватність активності), і Discord має бути запущений.
         </p>
         <div class="ctl">
           <label class="switch">
@@ -1531,9 +1539,8 @@ window.api.onClipboardLink((url) => {
   render();
   $("#q").focus();
 
-  if (s.discordEnabled && s.discordAppId) {
-    window.api.discordConnect(s.discordAppId).catch(() => {});
-  }
+  // Порожній ID — не помилка: головний процес підставить вшитий у програму.
+  if (s.discordEnabled) window.api.discordConnect(s.discordAppId).catch(() => {});
 
   // Сховище читаємо у фоні: воно потрібне ще й для позначки «вже є» в пошуку.
   loadLibrary();

@@ -217,7 +217,14 @@ handle("pl:add", (id, paths) => playlists.addTracks(id, paths));
 handle("pl:removeTrack", (id, path) => playlists.removeTrack(id, path));
 
 handle("discord:connect", async (appId) => {
-  await discord.connect(appId);
+  const id = String(appId || "").trim() || settings.BUILTIN_DISCORD_APP_ID;
+  if (!id) {
+    throw new Error(
+      "ID додатка не вказано. Вшитого в програму теж немає — створи додаток " +
+        "на discord.com/developers/applications і встав його Application ID.",
+    );
+  }
+  await discord.connect(id);
   return true;
 });
 handle("discord:disconnect", () => {
@@ -231,9 +238,8 @@ handle("discord:activity", (track) => {
   if (!s.discordEnabled) return false;
   // Підключаємось ліниво: якщо Discord запустили вже після нашої програми,
   // перше ж відтворення саме встановить з'єднання.
-  if (!discord.connected && s.discordAppId) {
-    discord.connect(s.discordAppId).catch(() => {});
-  }
+  const id = settings.discordAppId(s);
+  if (!discord.connected && id) discord.connect(id).catch(() => {});
   return discord.setActivity(track);
 });
 
