@@ -301,6 +301,10 @@ function connect(url) {
     // завантаження в каталог YouTube Music не потрапляють.
     check("джерело YouTube є в перемикачах",
       (await evalJs(`return !!document.querySelector('#sources input[value=youtube]')`)) === true);
+    // SoundCloud іде окремо й домальовується пізніше: він один тримав увесь
+    // пошук — 4.4 с проти 0.4 с у решти разом узятих.
+    check("SoundCloud домальовується після швидких джерел", (await until(`
+      return state.results.songs.some(s => s.source === 'soundcloud') ? true : null;`, 20, 700)) === true);
     check("є результати зі звичайного YouTube", (await evalJs(`
       return state.results.songs.filter(s => s.source === 'youtube').length;`)) > 0);
     await shot("треки");
@@ -792,6 +796,23 @@ function connect(url) {
     check("він позначений як потоковий",
       (await evalJs(`return !!document.querySelector('.row[data-pkey] .badge')`)) === true);
     await shot("плейлист-із-потоком");
+
+    // Завантажити ВЕСЬ плейлист. Раніше така кнопка була лише в альбомів і
+    // добірок, а у власних плейлистах — ні, хоч саме там і лежить незавантажене.
+    check("є кнопка завантажити весь плейлист",
+      (await evalJs(`return !!document.querySelector('[data-plact=plgrab]')`)) === true);
+    check("кнопка активна, бо трек ще не на диску",
+      (await evalJs(`return !document.querySelector('[data-plact=plgrab]').disabled`)) === true);
+
+    const plGrab = await evalJs(`
+      const before = state.jobs.size;
+      document.querySelector('[data-plact=plgrab]').click();
+      await new Promise(r => setTimeout(r, 1500));
+      const jobs = [...state.jobs.values()];
+      for (const j of jobs.slice(before)) await window.api.dlCancel(j.id);
+      return { added: state.jobs.size - before, url: jobs[jobs.length - 1]?.url || '' };`);
+    check("плейлист став завданням у черзі", plGrab?.added === 1, `додано ${plGrab?.added}`);
+    check("завдання веде на сам трек", /watch\?v=/.test(plGrab?.url || ""), plGrab?.url || "");
 
     const left = await evalJs(`
       for (const p of await window.api.plList()) {

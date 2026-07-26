@@ -740,8 +740,21 @@ async function resolveCatalogItem(item) {
   return getAlbum(hit.albumId);
 }
 
+/** Окремий вхід для SoundCloud — щоб він не гальмував решту пошуку. */
+async function soundcloudOnly(query, searchId) {
+  begin(searchId);
+  try {
+    return await soundcloud(query, 15, searchId);
+  } catch {
+    return []; // мовчазна невдача: решта результатів уже показана
+  } finally {
+    finish(searchId);
+  }
+}
+
 module.exports = {
   cancel,
+  soundcloudOnly,
   radio,
   home,
   mixTracks,

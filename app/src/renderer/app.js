@@ -572,28 +572,50 @@ function renderLibrary() {
   loadCovers();
 }
 
-/** Обкладинки тягнемо лише для видимих рядків: інакше сотня файлів = сотня читань. */
+/**
+ * Обкладинки Сховища.
+ *
+ * Читання однієї обкладинки — 8 мс, тож перші екрани вантажимо одразу, без
+ * посередників. Раніше все йшло через IntersectionObserver, і він часом
+ * мовчав (вікно ще не промальоване або пригальмоване фоном) — картинки
+ * лишались порожніми на рівному місці. Ліниве завантаження лишаємо тільки
+ * для хвоста великих списків, де воно справді має сенс.
+ */
+const EAGER_COVERS = 30;
 let coverObserver = null;
+
+function fetchCover(el) {
+  const p = el.dataset.cover;
+  if (!p || el.dataset.coverDone) return;
+  el.dataset.coverDone = "1";
+  window.api
+    .libCover(p)
+    .then((uri) => {
+      if (uri) el.src = uri;
+    })
+    .catch(() => {});
+}
+
 function loadCovers() {
   coverObserver?.disconnect();
+  const els = [...mainEl.querySelectorAll("[data-cover]")];
+
+  for (const el of els.slice(0, EAGER_COVERS)) fetchCover(el);
+
+  const rest = els.slice(EAGER_COVERS);
+  if (!rest.length) return;
+
   coverObserver = new IntersectionObserver(
     (entries) => {
       for (const e of entries) {
         if (!e.isIntersecting) continue;
-        const el = e.target;
-        coverObserver.unobserve(el);
-        const p = el.dataset.cover;
-        window.api
-          .libCover(p)
-          .then((uri) => {
-            if (uri) el.src = uri;
-          })
-          .catch(() => {});
+        coverObserver.unobserve(e.target);
+        fetchCover(e.target);
       }
     },
-    { root: mainEl, rootMargin: "200px" },
+    { root: mainEl, rootMargin: "300px" },
   );
-  for (const el of mainEl.querySelectorAll("[data-cover]")) coverObserver.observe(el);
+  for (const el of rest) coverObserver.observe(el);
 }
 
 async function loadLibrary(force = false) {
@@ -769,6 +791,9 @@ function renderPlaylists() {
     }
     const tracks = plTracks(pl);
     const lost = pl.tracks.length - tracks.length;
+    // Качати треба лише те, чого ще немає на диску: у локальних треків
+    // посилання немає взагалі, вони вже свої.
+    const toGrab = tracks.filter((t) => !t.path && t.url);
 
     mainEl.innerHTML = `
       <button class="ghost back" data-plact="back">← Усі плейлисти</button>
@@ -776,6 +801,10 @@ function renderPlaylists() {
         <h1>${esc(pl.name)}</h1>
         <span class="grow"></span>
         <button class="primary" data-plact="playall" ${tracks.length ? "" : "disabled"}>${icon("play")} Слухати все</button>
+        <button class="primary" data-plact="plgrab" ${toGrab.length ? "" : "disabled"}
+                title="${toGrab.length ? `Завантажити ${plural(toGrab.length, TRACKS)}` : "Усе вже на диску"}">
+          ${icon("download")} ЗАБИРАЮ ВСЕ!
+        </button>
         <button class="ghost" data-plact="rename" data-id="${esc(pl.id)}">Перейменувати</button>
         <button class="ghost danger" data-plact="delete" data-id="${esc(pl.id)}">Видалити</button>
       </div>
@@ -1087,8 +1116,14 @@ async function doSearch(e) {
   $("#topbar").hidden = false;
   loading(/^https?:/i.test(q) ? "Читаю посилання…" : "Шукаю по всіх джерелах…");
 
+  // SoundCloud запускаємо паралельно й НЕ чекаємо: він іде вчетверо довше за
+  // решту разом узятих, бо щоразу піднімає yt-dlp. Його результати домалюємо,
+  // коли прийдуть.
+  const wantSC = sources.includes("soundcloud");
+  const scPromise = wantSC ? window.api.searchSoundcloud(q, id + "sc").catch(() => []) : null;
+
   try {
-    const r = await window.api.search(q, sources, id);
+    const r = await window.api.search(q, sources.filter((s) => s !== "soundcloud"), id);
     // Поки чекали, користувач міг натиснути «Стоп» і почати новий пошук —
     // тоді цей результат уже нікому не потрібен і малювати його не можна.
     if (state.searchId !== id) return;
@@ -1114,6 +1149,20 @@ async function doSearch(e) {
       note.className = "note";
       note.textContent = "Частина джерел не відповіла: " + r.errors.join("; ");
       mainEl.prepend(note);
+    }
+
+    // Домальовуємо SoundCloud, коли він нарешті відповість.
+    if (scPromise) {
+      scPromise.then((sc) => {
+        if (state.searchId !== null && state.searchId !== id) return; // уже інший пошук
+        if (state.view.type !== "results" || !sc?.length) return;
+        state.results.songs = [...state.results.songs, ...sc];
+        if (state.tab === "songs") renderResults();
+        else {
+          const cnt = document.querySelector('.tab[data-tab="songs"] .cnt');
+          if (cnt) cnt.textContent = state.results.songs.length;
+        }
+      });
     }
   } catch (err) {
     if (state.searchId !== id) return;
@@ -1408,6 +1457,24 @@ async function play(track, list) {
   }
 
   audio.play().catch((e) => toast("Не вдалося відтворити: " + e.message));
+  // Наступний готуємо одразу, поки цей ще грає.
+  setTimeout(prefetchNext, 1500);
+}
+
+/**
+ * Готує посилання на потік для наступного треку, поки грає поточний.
+ *
+ * Отримання посилання коштує ~3.4 с, з яких 2.4 — це просто запуск yt-dlp
+ * (виміряно). Прибрати цей час не можна, але можна витратити його заздалегідь:
+ * тоді ⏭ і автоперехід спрацьовують миттєво. Головний процес кешує результат,
+ * тож повторний запит нічого не коштує.
+ */
+function prefetchNext() {
+  const n = nextIndex(true);
+  if (n < 0 || n === state.pq.i) return;
+  const t = state.pq.list[n];
+  if (!t || t.path || !t.url) return; // локальний файл готувати не треба
+  window.api.streamUrl(t.url).catch(() => {});
 }
 
 function playAt(i) {
@@ -1879,6 +1946,16 @@ mainEl.addEventListener("click", (e) => {
       const list = plTracks(state.playlists.find((p) => p.id === state.openPl));
       const t = list.find((x) => (trackKey(x) || x.key) === key);
       if (t && !t.missing) play(t, list.filter((x) => !x.missing));
+      return;
+    }
+    if (act === "plgrab") {
+      const pl = state.playlists.find((p) => p.id === state.openPl);
+      const list = plTracks(pl);
+      const need = list.filter((t) => !t.path && t.url);
+      if (!need.length) return toast("Усі треки цього плейлиста вже на диску.");
+      const have = list.length - need.length;
+      enqueue(need);
+      if (have) toast(`Пропущено ${plural(have, TRACKS)} — вони вже на диску.`, [], 5000);
       return;
     }
     if (act === "playall" || act === "playpl") {

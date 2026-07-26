@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("api", {
 
   search: (query, sources, searchId) => call("search:query", query, sources, searchId),
   cancelSearch: (searchId) => call("search:cancel", searchId),
+  searchSoundcloud: (query, searchId) => call("search:soundcloud", query, searchId),
   album: (id) => call("search:album", id),
   artist: (id) => call("search:artist", id),
   resolveCatalog: (item) => call("search:resolveCatalog", item),

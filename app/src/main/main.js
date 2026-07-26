@@ -135,6 +135,11 @@ handle("search:query", async (query, sources, searchId) => {
 
 handle("search:cancel", (searchId) => search.cancel(searchId));
 
+// SoundCloud шукається окремим викликом навмисно: він іде 4.4 с проти 0.4 с
+// у решти джерел (виміряно), бо щоразу піднімає yt-dlp. Якби він був у
+// спільному запиті, увесь пошук чекав би найповільнішого.
+handle("search:soundcloud", (query, searchId) => search.soundcloudOnly(query, searchId));
+
 handle("search:album", (id) => search.getAlbum(id));
 handle("search:artist", (id) => search.getArtist(id));
 handle("search:resolveCatalog", (item) => search.resolveCatalogItem(item));
