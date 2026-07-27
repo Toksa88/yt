@@ -15,6 +15,9 @@ async function call(channel, ...args) {
 
 contextBridge.exposeInMainWorld("api", {
   binaries: () => call("binaries:status"),
+  ytdlpCheck: () => call("tools:ytdlpCheck"),
+  ytdlpUpdate: () => call("tools:ytdlpUpdate"),
+  onYtdlpUpdated: (cb) => ipcRenderer.on("tools:ytdlp", (_e, r) => cb(r)),
 
   search: (query, sources, searchId) => call("search:query", query, sources, searchId),
   cancelSearch: (searchId) => call("search:cancel", searchId),

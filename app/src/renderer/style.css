@@ -1,18 +1,40 @@
+/**
+ * Чорно-біле, холодне, зернисте.
+ *
+ * Кольору тут немає майже зовсім — це навмисно: усе тримається на контрасті
+ * попелясто-білого й чорного, як на друкованому в підвалі буклеті. Акцент
+ * теж не колір, а світло: попелястий сірий і чиста білизна поверх нього.
+ *
+ * Через це світлий акцент став тлом для темного тексту, а не навпаки —
+ * скрізь, де раніше було «біле по фіолетовому», тепер чорне по попелу.
+ *
+ * Кольори джерел (YouTube, SoundCloud тощо) навмисно лишились своїми: вони
+ * позначають чуже, а не наше, і мусять упізнаватись з першого погляду.
+ */
 :root {
-  --bg: #101017;
-  --panel: #1b1b26;
-  --panel-2: #22222f;
-  --line: #2c2c3b;
-  --text: #e9e9f2;
-  --muted: #9a9ab0;
-  --accent: #7c5cff;
-  --accent-2: #a48bff;
-  --ok: #3ecf8e;
-  --err: #ff6b6b;
-  --warn: #ffc860;
-  --radius: 12px;
+  --bg: #060607;
+  --panel: #0d0d0f;
+  --panel-2: #141417;
+  --panel-3: #1e1e22;
+  --line: #26262b;
+  --text: #dcdce1;
+  --muted: #7b7b84;
+  --accent: #c2c6cd;
+  --accent-2: #ffffff;
+  /* Той самий акцент, але як підкладка й обвід — щоб не розкидати прозорість
+     хексами по всьому файлу. */
+  --accent-soft: #ffffff14;
+  /* Текст на світлому акценті. Без цього «біле по білому» лишалось невидимим. */
+  --on-accent: #0a0a0b;
+  --ok: #86a98d;
+  --err: #b5595f;
+  --warn: #b39a5e;
+  --radius: 3px;
   --nav-w: 214px;
   --player-h: 74px;
+  /* Заголовки — вузькою антиквою з широкою розрядкою: саме вона дає той
+     холодний друкований вигляд, якого не дасть жоден системний гротеск. */
+  --display: Constantia, "Palatino Linotype", Georgia, serif;
 }
 
 * {
@@ -35,24 +57,47 @@ body {
 body {
   display: flex;
   flex-direction: column;
-  background: radial-gradient(1200px 620px at 18% -12%, #262138 0%, var(--bg) 58%);
+  background:
+    radial-gradient(1100px 680px at 50% -22%, #141418 0%, transparent 68%),
+    var(--bg);
   color: var(--text);
   font: 14px/1.45 "Segoe UI", system-ui, sans-serif;
   overflow: hidden;
+}
+
+/**
+ * Зерно.
+ *
+ * Головна фактура всієї теми: без нього чорне тло виглядає просто вимкненим
+ * екраном. Шум намальовано вбудованим SVG — жодних зовнішніх файлів, бо
+ * політика безпеки сторінки нічого стороннього не пустить.
+ *
+ * Шар нерухомий і наскрізний для кліків, інакше вікном не покористуєшся.
+ * Без mix-blend-mode: змішування цілого екрана коштує кадрів, а різниці на
+ * такій прозорості не видно.
+ */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  pointer-events: none;
+  opacity: 0.055;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 button {
   font: inherit;
   color: inherit;
   border: 0;
-  border-radius: 9px;
+  border-radius: 3px;
   padding: 8px 14px;
   background: var(--panel-2);
   cursor: pointer;
   transition: background 0.14s, transform 0.08s, opacity 0.14s;
 }
 button:hover:not(:disabled) {
-  background: #2e2e40;
+  background: var(--panel-3);
 }
 button:active:not(:disabled) {
   transform: translateY(1px);
@@ -63,7 +108,9 @@ button:disabled {
 }
 button.primary {
   background: var(--accent);
+  color: var(--on-accent);
   font-weight: 600;
+  letter-spacing: 0.04em;
 }
 button.primary:hover:not(:disabled) {
   background: var(--accent-2);
@@ -86,7 +133,7 @@ select {
   color: var(--text);
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 3px;
   padding: 9px 12px;
   outline: none;
 }
@@ -138,29 +185,37 @@ button.iconbtn .ic {
   gap: 4px;
   padding: 16px 12px;
   border-right: 1px solid var(--line);
-  background: #14141dcc;
+  background: #0d0716cc;
 }
 
 .brand {
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  padding: 2px 6px 16px;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  padding: 4px 6px 18px;
   white-space: nowrap;
 }
+/* Знак лишається сам по собі, без плитки під ним: залита підкладка тягла на
+   себе увагу, а тут усе тримається на самих лініях. */
 .logo {
   display: inline-grid;
   place-items: center;
   width: 26px;
   height: 26px;
-  margin-right: 5px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, var(--accent), #ff6ec7);
-  vertical-align: -7px;
+  margin-right: 4px;
+  color: var(--accent-2);
+  vertical-align: -8px;
 }
 .logo .ic {
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   vertical-align: 0;
+  /* Гострі стики замість заокруглених: іконки в списках м'якші, але знак має
+     бути різаним. CSS тут перебиває атрибут у самому svg. */
+  stroke-linejoin: miter;
+  stroke-width: 1.35;
 }
 
 .navbtn {
@@ -172,16 +227,16 @@ button.iconbtn .ic {
   padding: 10px 12px;
   color: var(--muted);
   border-left: 3px solid transparent;
-  border-radius: 0 9px 9px 0;
+  border-radius: 0 3px 3px 0;
 }
 .navbtn:hover:not(:disabled) {
   background: #ffffff0d;
   color: var(--text);
 }
 .navbtn.active {
-  background: #7c5cff1f;
+  background: var(--accent-soft);
   border-left-color: var(--accent);
-  color: var(--text);
+  color: var(--accent-2);
   font-weight: 600;
 }
 .nico {
@@ -203,10 +258,11 @@ button.iconbtn .ic {
   margin-left: auto;
   min-width: 20px;
   padding: 1px 7px;
-  border-radius: 20px;
+  border-radius: 3px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 11px;
+  font-weight: 600;
   text-align: center;
 }
 
@@ -260,19 +316,21 @@ button.iconbtn .ic {
   flex: 1 1 auto;
   padding: 14px 16px 14px 44px;
   font-size: 16px;
-  border-radius: 12px;
+  border-radius: 3px;
 }
 .searchbox button {
   padding: 0 22px;
   font-weight: 600;
-  border-radius: 12px;
+  border-radius: 3px;
   background: var(--accent);
+  color: var(--on-accent);
 }
 .searchbox button:hover:not(:disabled) {
   background: var(--accent-2);
 }
 .searchbox button.ghost {
   background: transparent;
+  color: var(--text);
   font-weight: 400;
 }
 
@@ -281,7 +339,7 @@ button.iconbtn .ic {
   padding: 10px 14px;
   background: #3a2a10;
   border: 1px solid #5a4420;
-  border-radius: 10px;
+  border-radius: 3px;
   color: var(--warn);
   font-size: 13px;
   flex: 0 0 auto;
@@ -320,7 +378,7 @@ button.iconbtn .ic {
 }
 .tab {
   background: transparent;
-  border-radius: 9px 9px 0 0;
+  border-radius: 3px 3px 0 0;
   padding: 9px 16px;
   color: var(--muted);
   border-bottom: 2px solid transparent;
@@ -338,7 +396,7 @@ button.iconbtn .ic {
   min-width: 20px;
   margin-left: 6px;
   padding: 1px 6px;
-  border-radius: 20px;
+  border-radius: 3px;
   background: var(--panel-2);
   font-size: 11px;
   font-weight: 600;
@@ -368,9 +426,15 @@ button.iconbtn .ic {
   padding: 18px 24px 30px;
 }
 
-h1.page {
+h1.page,
+.libhead h1 {
   margin: 4px 0 18px;
-  font-size: 24px;
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.24em;
+  color: var(--accent-2);
 }
 
 .empty {
@@ -420,7 +484,7 @@ h1.page {
   font-size: 13px;
   padding: 10px 13px;
   border: 1px dashed var(--line);
-  border-radius: 10px;
+  border-radius: 3px;
   margin-bottom: 14px;
 }
 .note.err {
@@ -463,13 +527,13 @@ h3.sec {
   align-items: center;
   gap: 12px;
   padding: 6px 10px;
-  border-radius: 10px;
+  border-radius: 3px;
 }
 .row:hover {
   background: #ffffff0d;
 }
 .row.sel {
-  background: #7c5cff26;
+  background: var(--accent-soft);
 }
 .row.dim {
   opacity: 0.45;
@@ -482,7 +546,7 @@ h3.sec {
 .row .art {
   width: 44px;
   height: 44px;
-  border-radius: 7px;
+  border-radius: 3px;
   object-fit: cover;
   background: var(--panel-2);
 }
@@ -529,8 +593,8 @@ h3.sec {
   opacity: 0;
   pointer-events: none;
   /* М'який перехід зліва, щоб кнопки не «врізались» у текст під ними. */
-  background: linear-gradient(90deg, #1b1b2600, #1b1b26e6 30px);
-  border-radius: 10px;
+  background: linear-gradient(90deg, #130d1c00, #130d1cf0 30px);
+  border-radius: 3px;
 }
 .row:hover .act,
 .row.sel .act {
@@ -545,7 +609,7 @@ h3.sec {
 .badge {
   display: inline-block;
   padding: 1px 7px;
-  border-radius: 20px;
+  border-radius: 3px;
   font-size: 10.5px;
   font-weight: 600;
   vertical-align: 1px;
@@ -613,7 +677,7 @@ h3.sec {
 .card .cover {
   width: 100%;
   aspect-ratio: 1;
-  border-radius: 9px;
+  border-radius: 3px;
   object-fit: cover;
   background: var(--panel-2);
   display: block;
@@ -693,7 +757,7 @@ h3.sec {
 .job .art {
   width: 44px;
   height: 44px;
-  border-radius: 7px;
+  border-radius: 3px;
   object-fit: cover;
   background: var(--panel-2);
 }
@@ -892,7 +956,7 @@ h3.sec .ic {
 .set code {
   background: var(--panel-2);
   padding: 2px 6px;
-  border-radius: 5px;
+  border-radius: 3px;
   font-size: 12px;
 }
 .switch {
@@ -913,7 +977,7 @@ h3.sec .ic {
   gap: 14px;
   padding: 0 20px;
   border-top: 1px solid var(--line);
-  background: #14141ff2;
+  background: #0d0716f2;
 }
 .player.idle {
   opacity: 0.62;
@@ -921,7 +985,7 @@ h3.sec .ic {
 .part {
   width: 46px;
   height: 46px;
-  border-radius: 8px;
+  border-radius: 3px;
   object-fit: cover;
   background: var(--panel-2);
   flex: 0 0 auto;
@@ -977,7 +1041,7 @@ h3.sec .ic {
 /* Увімкнений режим має бути видно з першого погляду, без вчитування. */
 .pbtn.small.on {
   color: var(--accent-2);
-  background: #7c5cff24;
+  background: var(--accent-soft);
 }
 .pbtn.small.on[data-mode="one"]::after {
   content: "1";
@@ -1037,7 +1101,7 @@ h3.sec .ic {
   gap: 10px;
   padding: 9px 12px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 3px;
   margin-bottom: 6px;
   cursor: pointer;
 }
@@ -1071,8 +1135,9 @@ h3.sec .ic {
   place-items: center;
   width: 46px;
   height: 46px;
-  border-radius: 9px;
-  background: linear-gradient(135deg, var(--accent), #ff6ec7);
+  border-radius: 3px;
+  background: var(--accent);
+  color: var(--on-accent);
   flex: 0 0 auto;
 }
 .plcard .pic .ic {
@@ -1130,8 +1195,8 @@ h3.sec .ic {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line);
-  border-radius: 14px;
-  background: #191924f7;
+  border-radius: 3px;
+  background: #150d20f7;
   backdrop-filter: blur(10px);
   box-shadow: 0 16px 44px #000b;
   z-index: 45;
@@ -1171,7 +1236,104 @@ h3.sec .ic {
   line-height: 1.75;
   white-space: pre-wrap;
   word-break: break-word;
-  color: #d6d6e6;
+  color: #d8cbe8;
+}
+
+/* ---------------------------------------------- черга відтворення */
+
+/* Панель ділить розмітку з текстом пісні (обидві мають клас .lyrics),
+   тут — лише те, чим вона від нього відрізняється. */
+.queue {
+  width: min(460px, calc(100vw - 36px));
+  max-height: 64vh;
+}
+.qcount {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.qrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.qrow:hover {
+  background: #ffffff0d;
+}
+.qrow.now {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.qn {
+  flex: 0 0 auto;
+  width: 20px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+.qrow.now .qn {
+  color: var(--accent-2);
+}
+.qn .ic {
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+}
+.qart {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 3px;
+  object-fit: cover;
+}
+.qname {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+.qname b,
+.qname .sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qname .sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+.qdur {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+/* Кнопки притлумлені, доки на рядок не навели: інакше три хрестики в
+   стовпчик перетягують на себе всю увагу зі списку. */
+.qact {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 1px;
+  opacity: 0.35;
+  transition: opacity 0.14s;
+}
+.qrow:hover .qact {
+  opacity: 1;
+}
+.qact button {
+  padding: 4px;
+  background: transparent;
+}
+.qact button:disabled {
+  opacity: 0.25;
+}
+.qact .ic {
+  width: 15px;
+  height: 15px;
+  vertical-align: 0;
 }
 
 .modal {
@@ -1187,7 +1349,7 @@ h3.sec .ic {
   width: min(520px, calc(100vw - 48px));
   padding: 22px 24px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 3px;
   background: var(--panel);
   box-shadow: 0 20px 60px #000c;
 }
@@ -1234,7 +1396,7 @@ h3.sec .ic {
   margin: 12px auto -4px;
   padding: 10px 10px 10px 16px;
   border: 1px solid var(--accent);
-  border-radius: 12px;
+  border-radius: 3px;
   background: #241d3ceb;
   box-shadow: 0 6px 22px #0007;
   flex: 0 0 auto;
@@ -1288,7 +1450,7 @@ h3.sec .ic {
 ::-webkit-scrollbar-thumb {
   background: #34344a;
   border: 3px solid transparent;
-  border-radius: 8px;
+  border-radius: 3px;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {

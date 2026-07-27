@@ -140,6 +140,15 @@ const ICONS = {
   heart: '<path d="M12 20s-7.5-4.6-7.5-9.4A4.1 4.1 0 0 1 12 7.6a4.1 4.1 0 0 1 7.5 3C19.5 15.4 12 20 12 20z"/>',
   heartOn: '<path d="M12 20s-7.5-4.6-7.5-9.4A4.1 4.1 0 0 1 12 7.6a4.1 4.1 0 0 1 7.5 3C19.5 15.4 12 20 12 20z" fill="currentColor"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5.3l3.4 2"/>',
+  queue: '<path d="M4 6.5h11"/><path d="M4 11h11"/><path d="M4 15.5h7"/><path d="m14.5 13 5.5 3.2-5.5 3.3z" fill="currentColor" stroke="none"/>',
+  // Три однакові рівносторонні трикутники, зсунуті від спільного центра на
+  // 120°. Переплетення (де смуга проходить зверху, а де знизу) на 26 пікселях
+  // однаково не читається, тому малюємо спрощену форму — саме її й малюють
+  // майже всюди.
+  valknut:
+    '<path d="M12 5.05 6.11 15.25h11.78z"/><path d="M9.88 8.73 3.99 18.93h11.78z"/><path d="M14.12 8.73 8.23 18.93h11.78z"/>',
+  up: '<path d="M12 19V6"/><path d="m6.5 11.5 5.5-5.5 5.5 5.5"/>',
+  down: '<path d="M12 5v13"/><path d="m6.5 12.5 5.5 5.5 5.5-5.5"/>',
 };
 
 function icon(name, cls = "") {
@@ -161,7 +170,7 @@ function paintIcons(root = document) {
 const BLANK =
   "data:image/svg+xml;utf8," +
   encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="%2322222f"/><text x="32" y="41" font-size="26" text-anchor="middle" fill="%236a6a85">♫</text></svg>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="%23141417"/><text x="32" y="41" font-size="26" text-anchor="middle" fill="%235c5c66">♫</text></svg>`,
   );
 
 function img(url, cls, extra = "") {
@@ -184,13 +193,15 @@ function avatar(name) {
 
   let hash = 0;
   for (const ch of text) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
-  const hue = hash % 360;
+  // Тема майже без кольору, тож і аватари беруть не відтінок, а яскравість:
+  // кольорові квадрати в сірому списку били б по очах дужче за самі обкладинки.
+  const light = 16 + (hash % 14);
 
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">` +
     `<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">` +
-    `<stop offset="0" stop-color="hsl(${hue} 55% 42%)"/>` +
-    `<stop offset="1" stop-color="hsl(${(hue + 48) % 360} 55% 26%)"/>` +
+    `<stop offset="0" stop-color="hsl(240 6% ${light + 10}%)"/>` +
+    `<stop offset="1" stop-color="hsl(240 6% ${light}%)"/>` +
     `</linearGradient></defs>` +
     `<rect width="120" height="120" fill="url(#g)"/>` +
     `<text x="60" y="60" fill="#fff" fill-opacity="0.92" font-family="Segoe UI, sans-serif"` +
@@ -301,6 +312,7 @@ function songRow(s) {
       <div class="dur">${dur(s.duration)}</div>
       <div class="act">
         ${dead ? "" : `<button data-act="listen" class="ghost iconbtn" title="Послухати не завантажуючи">${icon("play")}</button>`}
+        ${dead ? "" : `<button data-act="playnext" class="ghost iconbtn" title="Грати наступним">${icon("queue")}</button>`}
         ${favBtn(s)}
         ${dead ? "" : `<button data-act="toplaylist" class="ghost iconbtn" title="У плейлист">${icon("plus")}</button>`}
         ${s.source === "ytmusic" ? `<button data-act="radio" class="ghost iconbtn" title="Радіо за цим треком">${icon("radio")}</button>` : ""}
@@ -517,6 +529,7 @@ function libRow(t) {
       <div class="dur">${dur(t.duration)}</div>
       <div class="act">
         <button data-lact="play" class="primary iconbtn">${icon(isPlaying && !audio.paused ? "pause" : "play")}</button>
+        <button data-lact="playnext" class="ghost iconbtn" title="Грати наступним">${icon("queue")}</button>
         ${favBtn(t)}
         <button data-lact="toplaylist" class="ghost">${icon("plus")} У плейлист</button>
         <button data-lact="tags" class="ghost">${icon("tag")} Теги</button>
@@ -1029,17 +1042,73 @@ function renderSettings() {
     })
     .catch(() => {});
 
-  window.api.binaries().then((b) => {
-    const el = $("#binSet");
-    if (!el) return;
-    el.innerHTML = `
-      <h4>Зовнішні програми</h4>
-      <p>Без них можливий лише пошук, завантаження не працюватиме.</p>
-      <div class="ctl">
-        <span>yt-dlp: ${b.ytdlp ? `<code>${esc(b.ytdlp.version || b.ytdlp.path)}</code>` : "<b>не знайдено</b>"}</span>
-        <span>ffmpeg: ${b.ffmpeg ? `<code>${esc(b.ffmpeg)}</code>` : "<b>не знайдено</b>"}</span>
-      </div>`;
-  });
+  renderBins();
+}
+
+/** Стан yt-dlp та ffmpeg і ручне оновлення yt-dlp. */
+async function renderBins() {
+  const el = $("#binSet");
+  if (!el) return;
+
+  const b = await window.api.binaries();
+  const s = state.settings;
+  el.innerHTML = `
+    <h4>Зовнішні програми</h4>
+    <p>
+      <b>yt-dlp</b> завантажує, <b>ffmpeg</b> обробляє. Обидві вшиті в інсталятор,
+      тож ставити їх окремо не треба. Якщо запускаєш програму з вихідних кодів —
+      виконай <code>npm run bins</code>, і вони самі ляжуть у теку <code>app/bin</code>.
+    </p>
+    <p>
+      yt-dlp мусить бути свіжим: YouTube регулярно змінює свій бік, і стара версія
+      просто перестає качати. Оновлена копія лягає у профіль користувача — тека
+      з програмою при цьому не чіпається, тому права адміністратора не потрібні.
+    </p>
+    <div class="ctl">
+      <span>yt-dlp: ${b.ytdlp ? `<code>${esc(b.ytdlp.version || b.ytdlp.path)}</code>` : "<b>не знайдено</b>"}</span>
+      <span>ffmpeg: ${b.ffmpeg ? `<code>${esc(b.ffmpeg)}</code>` : "<b>не знайдено</b>"}</span>
+    </div>
+    <div class="ctl">
+      <label class="switch">
+        <input type="checkbox" id="ytdlpAuto" ${s.ytdlpAutoUpdate ? "checked" : ""} />
+        Оновлювати yt-dlp автоматично
+      </label>
+    </div>
+    <div class="ctl spaced">
+      <button class="ghost" id="ytdlpUpd">Перевірити оновлення</button>
+    </div>
+    <div class="mnote" id="ytdlpMsg"></div>`;
+}
+
+/** Ручна перевірка: спершу питаємо GitHub, качаємо лише якщо є що. */
+async function updateYtdlp() {
+  const btn = $("#ytdlpUpd");
+  const msg = $("#ytdlpMsg");
+  if (!btn || !msg) return;
+
+  btn.disabled = true;
+  msg.className = "mnote";
+  msg.textContent = "Питаю GitHub…";
+  try {
+    const { current, latest, fresh } = await window.api.ytdlpCheck();
+    if (fresh) {
+      msg.textContent = `Уже найсвіжіша: ${current}`;
+      return;
+    }
+    msg.textContent = `Є ${latest}${current ? ` (стоїть ${current})` : ""} — качаю…`;
+    const r = await window.api.ytdlpUpdate();
+    // Перемальовуємо весь блок, щоб у рядку стану стояла вже нова версія;
+    // повідомлення після цього доводиться писати наново — розмітка інша.
+    await renderBins();
+    const line = $("#ytdlpMsg");
+    if (line) line.textContent = `Оновлено до ${r.version}.`;
+    return;
+  } catch (e) {
+    msg.className = "mnote err";
+    msg.textContent = "Не вийшло: " + e.message;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ------------------------------------------------------------------ малювання
@@ -1157,7 +1226,7 @@ async function doSearch(e) {
     state.view = { type: "results" };
     render();
 
-    if (r.errors?.length) {
+    if (r.errors?.length && state.page === "search") {
       const note = document.createElement("div");
       note.className = "note";
       note.textContent = "Частина джерел не відповіла: " + r.errors.join("; ");
@@ -1168,8 +1237,17 @@ async function doSearch(e) {
     if (scPromise) {
       scPromise.then((sc) => {
         if (state.searchId !== null && state.searchId !== id) return; // уже інший пошук
-        if (state.view.type !== "results" || !sc?.length) return;
+        if (!sc?.length) return;
+
+        // У пам'ять кладемо завжди: людина могла піти в Сховище й повернутись,
+        // і тоді треки мають бути на місці.
         state.results.songs = [...state.results.songs, ...sc];
+
+        // А от малювати можна лише те, на що людина зараз дивиться. SoundCloud
+        // думає близько чотирьох секунд — за цей час встигаєш піти в Сховище,
+        // і підміняти сторінку під руками не можна.
+        if (state.page !== "search" || state.view.type !== "results") return;
+
         if (state.tab === "songs") renderResults();
         else {
           const cnt = document.querySelector('.tab[data-tab="songs"] .cnt');
@@ -1445,11 +1523,16 @@ async function play(track, list) {
   $("#plPlay").disabled = false;
   $("#plSeek").disabled = false;
   syncNavBtns();
+  pushMediaSession();
+  renderQueuePanel();
 
   if (track.path) {
     audio.src = fileUrl(track.path);
     window.api.libCover(track.path).then((u) => {
-      if (u && trackKey(state.playing) === trackKey(track)) $("#plArt").src = u;
+      if (u && trackKey(state.playing) === trackKey(track)) {
+        $("#plArt").src = u;
+        pushMediaSession(); // обкладинка дійшла — оновимо й системну панель
+      }
     });
   } else {
     // Трек із пошуку: справжнє посилання на звук треба спершу отримати,
@@ -1608,6 +1691,179 @@ function pushDiscord() {
     .catch(() => {});
 }
 
+// ------------------------------------------------------------------ черга відтворення
+
+/**
+ * Панель «що гратиме далі».
+ *
+ * Черга існувала від самого початку, але лише всередині програми: побачити її
+ * було ніяк, а отже й переставити щось або викинути. Тут вона стає видимою.
+ */
+function queueRow(t, i) {
+  const now = i === state.pq.i;
+  return `
+    <div class="qrow${now ? " now" : ""}" data-qi="${i}">
+      <span class="qn">${now ? icon("play") : i + 1}</span>
+      ${img(t.thumb || t.thumbUrl, "qart")}
+      <div class="qname">
+        <b>${esc(t.title)}</b>
+        <span class="sub">${esc(t.artist || "невідомий виконавець")}</span>
+      </div>
+      <span class="qdur">${dur(t.duration)}</span>
+      <span class="qact">
+        <button data-qact="up" class="ghost iconbtn" title="Вище" ${i === 0 ? "disabled" : ""}>${icon("up")}</button>
+        <button data-qact="down" class="ghost iconbtn" title="Нижче" ${
+          i === state.pq.list.length - 1 ? "disabled" : ""
+        }>${icon("down")}</button>
+        <button data-qact="drop" class="ghost iconbtn danger" title="Прибрати з черги">${icon("close")}</button>
+      </span>
+    </div>`;
+}
+
+function renderQueuePanel() {
+  const panel = $("#queuePanel");
+  if (panel.hidden) return;
+
+  const { list, i } = state.pq;
+  $("#queueCount").textContent = list.length ? `${i + 1} з ${list.length}` : "";
+  $("#queueBody").innerHTML = list.length
+    ? list.map(queueRow).join("")
+    : `<div class="note">Черга порожня. Увімкни будь-що — і сюди потрапить увесь список, з якого ти це взяв.</div>`;
+}
+
+function toggleQueuePanel() {
+  const panel = $("#queuePanel");
+  panel.hidden = !panel.hidden;
+  // Дві панелі поруч не вміщаються — відкриваючи одну, ховаємо другу.
+  if (!panel.hidden) {
+    $("#lyricsPanel").hidden = true;
+    renderQueuePanel();
+  }
+}
+
+/** Прибирає трек із черги, не зупиняючи того, що зараз грає. */
+function queueDrop(i) {
+  const { list } = state.pq;
+  if (!list[i]) return;
+  list.splice(i, 1);
+  // Якщо викинули те, що грає, зсуваємо покажчик на позицію перед дірою:
+  // тоді «наступний» веде на трек, який щойно посунувся на це місце.
+  if (i <= state.pq.i) state.pq.i--;
+  renderQueuePanel();
+  syncNavBtns();
+}
+
+/** @param {number} i звідки  @param {number} d -1 вище, +1 нижче */
+function queueMove(i, d) {
+  const { list } = state.pq;
+  const j = i + d;
+  if (!list[i] || !list[j]) return;
+  [list[i], list[j]] = [list[j], list[i]];
+  // Покажчик має їхати за самим треком, інакше «зараз грає» перестрибне на чуже.
+  if (state.pq.i === i) state.pq.i = j;
+  else if (state.pq.i === j) state.pq.i = i;
+  renderQueuePanel();
+  syncNavBtns();
+}
+
+/** Вставляє трек одразу після поточного — класичне «грати наступним». */
+function playNext(track) {
+  if (!track) return;
+  if (!state.playing || state.pq.i < 0) return play(track);
+
+  state.pq.list.splice(state.pq.i + 1, 0, track);
+  renderQueuePanel();
+  syncNavBtns();
+  toast(`«${track.title}» гратиме наступним`, [], 2500);
+}
+
+// ------------------------------------------------------------------ система
+
+/**
+ * Віддає поточний трек операційній системі.
+ *
+ * У Windows це та сама панель, що виїжджає при зміні гучності: з обкладинкою,
+ * назвою і кнопками. Разом з нею починають працювати медіаклавіші на
+ * клавіатурі та навушниках — навіть коли вікно згорнуте й не в фокусі.
+ */
+function pushMediaSession() {
+  const ms = navigator.mediaSession;
+  if (!ms) return;
+
+  const t = state.playing;
+  if (!t) {
+    ms.metadata = null;
+    ms.playbackState = "none";
+    return;
+  }
+
+  // Беремо саме те, що вже показано в плеєрі: для завантаженого файлу це
+  // обкладинка з тегів, для знайденого — прев'ю з мережі.
+  const art = $("#plArt").src;
+  try {
+    ms.metadata = new MediaMetadata({
+      title: t.title || "?",
+      artist: t.artist || "невідомий виконавець",
+      album: t.album || "",
+      artwork: art && art !== BLANK ? [{ src: art }] : [],
+    });
+  } catch {
+    /* система відмовилась від картинки — назва все одно вже показана */
+  }
+  ms.playbackState = audio.paused ? "paused" : "playing";
+}
+
+/** Смужка перемотки в системній панелі. */
+function pushPosition() {
+  const ms = navigator.mediaSession;
+  if (!ms?.setPositionState) return;
+  if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
+  try {
+    ms.setPositionState({
+      duration: audio.duration,
+      playbackRate: audio.playbackRate || 1,
+      position: Math.min(audio.currentTime, audio.duration),
+    });
+  } catch {
+    /* трапляється на живому потоці, де тривалість пливе */
+  }
+}
+
+/** Кнопки системної панелі та медіаклавіші. Ставимо один раз на старті. */
+function setupMediaKeys() {
+  const ms = navigator.mediaSession;
+  if (!ms?.setActionHandler) return;
+  const set = (action, fn) => {
+    try {
+      ms.setActionHandler(action, fn);
+    } catch {
+      /* цю дію система не підтримує — не біда */
+    }
+  };
+
+  set("play", () => audio.play().catch(() => {}));
+  set("pause", () => audio.pause());
+  set("stop", stopPlayback);
+  set("previoustrack", () => {
+    if (state.pq.i > 0) playAt(state.pq.i - 1);
+  });
+  set("nexttrack", () => {
+    const n = nextIndex(false);
+    if (n >= 0) playAt(n);
+  });
+  set("seekbackward", (d) => {
+    audio.currentTime = Math.max(0, audio.currentTime - (d?.seekOffset || 10));
+  });
+  set("seekforward", (d) => {
+    if (audio.duration) {
+      audio.currentTime = Math.min(audio.duration, audio.currentTime + (d?.seekOffset || 10));
+    }
+  });
+  set("seekto", (d) => {
+    if (Number.isFinite(d?.seekTime)) audio.currentTime = d.seekTime;
+  });
+}
+
 /** Повністю відпускає файл: інакше Windows не дасть його перейменувати. */
 function stopPlayback() {
   audio.pause();
@@ -1616,6 +1872,8 @@ function stopPlayback() {
   state.playing = null;
   state.pq = { list: [], i: -1 };
   window.api.discordActivity(null).catch(() => {});
+  pushMediaSession();
+  renderQueuePanel();
   $("#player").classList.add("idle");
   $("#plPlay").disabled = true;
   $("#plSeek").disabled = true;
@@ -1641,6 +1899,7 @@ function syncPlayBtn() {
     if (b) b.innerHTML = icon(on && !audio.paused ? "pause" : "play");
   });
   pushDiscord();
+  pushMediaSession();
 }
 
 audio.addEventListener("play", syncPlayBtn);
@@ -1659,7 +1918,11 @@ audio.addEventListener("ended", () => {
 audio.addEventListener("loadedmetadata", () => {
   $("#plEnd").textContent = dur(audio.duration);
   pushDiscord();
+  pushPosition();
 });
+// Саме на seeked, а не на timeupdate: системі досить знати, куди стрибнули,
+// а оновлювати позицію двадцять разів на секунду — марна робота.
+audio.addEventListener("seeked", pushPosition);
 audio.addEventListener("timeupdate", () => {
   $("#plNow").textContent = dur(audio.currentTime);
   if (audio.duration) $("#plSeek").value = String((audio.currentTime / audio.duration) * 1000);
@@ -1708,6 +1971,22 @@ $("#plRadio").addEventListener("click", () => {
   startRadio({ ...t, id, source: "ytmusic" });
 });
 $("#plLyrics").addEventListener("click", toggleLyrics);
+$("#plQueue").addEventListener("click", toggleQueuePanel);
+$("#queueClose").addEventListener("click", () => ($("#queuePanel").hidden = true));
+
+$("#queueBody").addEventListener("click", (e) => {
+  const row = e.target.closest("[data-qi]");
+  if (!row) return;
+  const i = Number(row.dataset.qi);
+
+  const act = e.target.closest("[data-qact]")?.dataset.qact;
+  if (act === "up") return queueMove(i, -1);
+  if (act === "down") return queueMove(i, 1);
+  if (act === "drop") return queueDrop(i);
+
+  // Клік по самому рядку — перейти до цього треку.
+  if (i !== state.pq.i) playAt(i);
+});
 
 /**
  * Гарячі клавіші. Свідомо не чіпаємо їх, коли фокус у полі вводу — інакше
@@ -1739,6 +2018,7 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.code === "KeyP" && state.pq.i > 0) playAt(state.pq.i - 1);
   if (e.code === "KeyL") toggleLyrics();
+  if (e.code === "KeyQ") toggleQueuePanel();
   if (e.code === "KeyF" && state.playing) toggleFav(state.playing);
 });
 $("#lyricsClose").addEventListener("click", () => ($("#lyricsPanel").hidden = true));
@@ -1791,6 +2071,7 @@ mainEl.addEventListener("click", (e) => {
       const queue = (state.results[state.tab] || []).filter((s) => s.kind === "song" && s.url);
       return play(it, queue.length ? queue : undefined);
     }
+    if (act === "playnext") return playNext(index.get(rowKey));
     if (act === "toplaylist") return openPlModal([index.get(rowKey)]);
     if (act === "radio") return startRadio(index.get(rowKey));
     if (act === "dl-one") return enqueue([index.get(rowKey)]);
@@ -1826,6 +2107,7 @@ mainEl.addEventListener("click", (e) => {
       refreshSelbar();
       return;
     }
+    if (lb.dataset.lact === "playnext") return playNext(track);
     if (lb.dataset.lact === "toplaylist") return openPlModal([track]);
     if (lb.dataset.lact === "tags") return openTagEditor([p]);
     if (lb.dataset.lact === "play") {
@@ -2031,6 +2313,10 @@ mainEl.addEventListener("change", (e) => {
     state.settings.albumFolder = e.target.checked;
     window.api.setSettings({ albumFolder: e.target.checked });
   }
+  if (e.target.id === "ytdlpAuto") {
+    state.settings.ytdlpAutoUpdate = e.target.checked;
+    window.api.setSettings({ ytdlpAutoUpdate: e.target.checked });
+  }
   if (e.target.id === "discordOn") {
     state.settings.discordEnabled = e.target.checked;
     window.api.setSettings({ discordEnabled: e.target.checked });
@@ -2067,6 +2353,7 @@ mainEl.addEventListener("input", (e) => {
 });
 
 mainEl.addEventListener("click", async (e) => {
+  if (e.target.id === "ytdlpUpd") return updateYtdlp();
   if (e.target.id !== "discordTest") return;
   const msg = $("#discordMsg");
   const id = $("#discordId").value.trim();
@@ -2220,6 +2507,7 @@ window.api.onClipboardLink((url) => {
 
 (async function init() {
   paintIcons();
+  setupMediaKeys();
   const s = await window.api.getSettings();
   state.settings = s;
   $$("#sources input").forEach((cb) => (cb.checked = s.sources.includes(cb.value)));
@@ -2236,10 +2524,16 @@ window.api.onClipboardLink((url) => {
     if (!b.ffmpeg) miss.push("ffmpeg");
     const w = $("#warn");
     w.hidden = false;
+    // Зібрана програма несе обидві в собі, тож сюди потрапляє переважно той,
+    // хто запустив з вихідних кодів — йому й підказуємо, що робити.
     w.textContent =
       `Не знайдено: ${miss.join(", ")}. Пошук працюватиме, а завантаження — ні. ` +
-      `Поклади ${miss.join(" і ")} у теку bin поруч із програмою.`;
+      `Виконай «npm run bins» або поклади ${miss.join(" і ")} у теку app/bin.`;
   }
+
+  // Оновлення yt-dlp минає тихо, але сказати про нього варто: інакше зміна
+  // поведінки (щось раптом знову качається) виглядає випадковою.
+  window.api.onYtdlpUpdated((r) => toast(`yt-dlp оновлено до ${r.version}`, [], 5000));
 
   state.jobs = new Map((await window.api.dlList()).map((j) => [j.id, j]));
   refreshQueueBadge();

@@ -10,7 +10,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { execFileSync } = require("child_process");
+const { execFileSync, execFile } = require("child_process");
 
 // Поза Electron (тести, перевірка з консолі) `require("electron")` віддає
 // не об'єкт, а рядок зі шляхом — тому app може бути undefined. Модуль має
@@ -28,6 +28,16 @@ const EXE = (name) => (IS_WIN ? name + ".exe" : name);
 /** Теки, куди ми самі кладемо бінарники: у зібраному додатку та в дереві розробки. */
 function bundledDirs() {
   const dirs = [];
+  // Профіль користувача — перший навмисно: сюди лягає yt-dlp, оновлений уже
+  // після встановлення (див. tools.js). Вшита в інсталятор копія застаріває,
+  // і свіжа мусить її переважати, а не навпаки.
+  if (app) {
+    try {
+      dirs.push(path.join(app.getPath("userData"), "bin"));
+    } catch {
+      /* профіль недоступний — обійдемось вшитою копією */
+    }
+  }
   if (app && app.isPackaged) {
     dirs.push(path.join(process.resourcesPath, "bin"));
     dirs.push(path.dirname(app.getPath("exe")));
@@ -146,13 +156,49 @@ function ffmpegDir() {
 function reset() {
   _ytdlp = undefined;
   _ffmpegDir = undefined;
+  _version = undefined;
+}
+
+/**
+ * Версія yt-dlp. Кеш тут не заради швидкості: yt-dlp.exe — це запакований
+ * Python, і КОЖЕН його запуск спершу розпаковує себе в тимчасову теку. На
+ * холодну це кілька секунд, і питати версію щоразу заново — розкіш.
+ */
+let _version;
+
+/**
+ * Те саме, але не блокуючи процес.
+ *
+ * status() лишається синхронним: він потрібен інтерфейсу один раз на старті,
+ * і там усе одно нічого не намальовано. А от фоновій перевірці оновлень так
+ * робити не можна — синхронний запуск морозить головний процес, а разом з
+ * ним IPC і все вікно: Сховище зависає на «читаю теги», кнопки не тиснуться.
+ */
+function ytdlpVersion() {
+  return new Promise((resolve) => {
+    if (_version !== undefined) return resolve(_version);
+    const y = ytdlp();
+    if (!y) {
+      _version = null;
+      return resolve(null);
+    }
+    execFile(
+      y.file,
+      [...y.prefix, "--version"],
+      { encoding: "utf8", timeout: 30000, windowsHide: true },
+      (err, out) => {
+        _version = err ? null : String(out).trim();
+        resolve(_version);
+      },
+    );
+  });
 }
 
 function status() {
   const y = ytdlp();
   const f = ffmpegDir();
-  let version = null;
-  if (y) {
+  let version = _version ?? null;
+  if (y && _version === undefined) {
     try {
       version = execFileSync(y.file, [...y.prefix, "--version"], {
         encoding: "utf8",
@@ -160,7 +206,9 @@ function status() {
       }).trim();
     } catch {
       /* є файл, але не запускається — покажемо як «версія невідома» */
+      version = null;
     }
+    _version = version;
   }
   return {
     ytdlp: y ? { path: y.file, kind: y.kind, version } : null,
@@ -169,4 +217,4 @@ function status() {
   };
 }
 
-module.exports = { ytdlp, ffmpegDir, status, reset, bundledDirs };
+module.exports = { ytdlp, ffmpegDir, status, ytdlpVersion, reset, bundledDirs };

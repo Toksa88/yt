@@ -5,6 +5,9 @@
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
+    "bins": "node scripts/fetch-bins.js",
+    "prebuild": "node scripts/fetch-bins.js",
+    "prerelease": "node scripts/fetch-bins.js",
     "build": "electron-builder --win",
     "release": "electron-builder --win --publish always",
     "test": "node test/download.test.js && node test/ui.test.js",

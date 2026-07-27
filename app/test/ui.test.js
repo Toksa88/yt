@@ -146,12 +146,21 @@ function connect(url) {
   try {
     console.log("\n[1] Вікно і каркас");
     check("заголовок", (await evalJs("return document.title")) === "Music Grabber");
+    // Колір акценту навмисно не вписаний числом: тема змінна, а перевіряти
+    // тут треба інше — що таблиця стилів під'їхала і активна вкладка
+    // підкреслена саме акцентом, хай яким він цього разу буде.
     check("стилі застосувались", (await evalJs(`
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--accent)';
+      document.body.appendChild(probe);
+      const accent = getComputedStyle(probe).color;
+      probe.remove();
       const b = getComputedStyle(document.body);
       const tab = getComputedStyle(document.querySelector('.tab.active'));
       return document.styleSheets.length > 0
           && b.backgroundImage.includes('gradient')
-          && tab.borderBottomColor === 'rgb(124, 92, 255)';`)) === true);
+          && accent.startsWith('rgb')
+          && tab.borderBottomColor === accent;`)) === true);
     // Регресія: активна кнопка в панелі й стартова сторінка розійшлися —
     // панель світила «Головну», а на екрані був «Шукач», і рекомендації
     // взагалі не вантажились.
@@ -507,7 +516,96 @@ function connect(url) {
     await sleep(300);
     check("пауза працює", (await evalJs("return document.querySelector('#audio').paused")) === true);
 
-    console.log("\n[10b] Позначка «вже є» в пошуку");
+    // Це те, що бачить сама Windows: панель біля гучності та медіаклавіші на
+    // клавіатурі й навушниках. Перевіряти доводиться зсередини — назовні
+    // панель ніяк не спитаєш.
+    console.log("\n[10b] Системна панель «зараз грає»");
+    const ms = await evalJs(`
+      const m = navigator.mediaSession.metadata;
+      return {
+        title: m?.title || null,
+        artist: m?.artist || null,
+        art: m ? [...m.artwork].map(a => String(a.src).slice(0, 12)) : [],
+        stateNow: navigator.mediaSession.playbackState,
+      };`);
+    check("система знає назву треку", ms?.title === "Cipher", ms?.title || "нічого");
+    check("система знає виконавця", ms?.artist === "Kevin MacLeod", ms?.artist || "нічого");
+    check("обкладинка віддана системі", ms?.art?.length > 0, ms?.art?.[0] || "порожньо");
+    check("стан збігається з плеєром (пауза)", ms?.stateNow === "paused", ms?.stateNow);
+
+    // Кнопка «грати» в системній панелі шле ту саму дію, що й медіаклавіша.
+    // Викликаємо її так само, як зробила б система.
+    const resumed = await evalJs(`
+      document.querySelector('#plPlay').click();
+      return true;`);
+    const nowPlaying = await until(`
+      return navigator.mediaSession.playbackState === 'playing' ? true : null;`, 15, 200);
+    check("стан їде за плеєром при відновленні", Boolean(resumed && nowPlaying));
+    await evalJs(`document.querySelector('#plPlay').click(); return true`); // лишаємо на паузі
+
+    // Черга завжди існувала всередині, але побачити її було ніяк — а отже й
+    // переставити щось або викинути.
+    console.log("\n[10b2] Панель черги відтворення");
+    await evalJs(`document.querySelector('#plQueue').click(); return true`);
+    await sleep(300);
+    const q0 = await evalJs(`
+      return {
+        open: !document.querySelector('#queuePanel').hidden,
+        rows: document.querySelectorAll('#queueBody .qrow').length,
+        now: document.querySelector('#queueBody .qrow.now')?.querySelector('b')?.textContent || null,
+        count: document.querySelector('#queueCount').textContent,
+      };`);
+    check("панель відкрилась", q0?.open === true);
+    check("у ній видно чергу", q0?.rows > 0, `${q0?.rows} треків, «${q0?.count}»`);
+    check("поточний трек позначено", q0?.now === "Cipher", q0?.now || "нічого");
+
+    // Для переставляння потрібна черга з кількох треків, а зі Сховища тут
+    // рівно один файл. Складаємо власну з вигаданих: перевіряємо саму
+    // механіку, і залежати від того, що встиг знайти пошук, вона не має.
+    const moved = await evalJs(`
+      state.pq = {
+        list: [1, 2, 3, 4].map(n => ({ title: 'Черга ' + n, artist: 'Тест', url: 'https://example.invalid/' + n })),
+        i: 1,
+      };
+      renderQueuePanel();
+      const before = state.pq.list.map(t => t.title);
+      queueMove(2, -1);
+      return { before, after: state.pq.list.map(t => t.title), i: state.pq.i };`);
+    // Довжину звіряємо навмисно: без неї перевірка проходила б і на порожній
+    // черзі, де обидві сторони рівності — undefined.
+    check("трек піднімається вгору",
+      moved?.after.length === 4 && moved.after[1] === moved.before[2] && moved.after[2] === moved.before[1],
+      moved?.after.join(", "));
+    // Найважливіше: покажчик мусить їхати за самим треком, інакше «зараз грає»
+    // перестрибує на чужу пісню.
+    check("позначка «зараз грає» їде за треком", moved?.i === 2, `індекс ${moved?.i}`);
+
+    const dropped = await evalJs(`
+      const len = state.pq.list.length, gone = state.pq.list[0].title;
+      queueDrop(0);
+      return { len, now: state.pq.list.length, gone, first: state.pq.list[0].title, i: state.pq.i };`);
+    check("трек прибирається з черги",
+      dropped?.now === dropped?.len - 1 && dropped?.first !== dropped?.gone);
+    check("покажчик зсунувся разом зі списком", dropped?.i === 1, `індекс ${dropped?.i}`);
+
+    const nexted = await evalJs(`
+      const t = { title: 'Вставлений', artist: 'Тест', url: 'https://example.invalid/x' };
+      playNext(t);
+      return { at: state.pq.list[state.pq.i + 1]?.title, rows: document.querySelectorAll('#queueBody .qrow').length };`);
+    check("«грати наступним» ставить одразу за поточним", nexted?.at === "Вставлений");
+    check("панель одразу це показує", nexted?.rows === dropped?.now + 1, `${nexted?.rows} рядків`);
+
+    await shot("черга-відтворення");
+    await evalJs(`document.querySelector('#queueClose').click(); return true`);
+    check("панель закривається", (await evalJs("return document.querySelector('#queuePanel').hidden")) === true);
+    // Черга була підмінена вручну — повертаємо її до того, що справді грає,
+    // щоб наступні перевірки починали з чесного стану.
+    await evalJs(`
+      state.pq = state.playing ? { list: [state.playing], i: 0 } : { list: [], i: -1 };
+      syncNavBtns();
+      return true;`);
+
+    console.log("\n[10c] Позначка «вже є» в пошуку");
     await evalJs(`
       document.querySelector('.navbtn[data-page=search]').click();
       document.querySelector('#q').value = 'Kevin MacLeod Cipher';
@@ -519,6 +617,30 @@ function connect(url) {
       if (!r.length) return null;
       return { any: !!document.querySelector('.badge.owned'), rows: r.length };`, 40, 1000);
     check("знайдений трек позначено як наявний", owned?.any === true, `${owned?.rows} рядків`);
+
+    // SoundCloud відповідає окремо й повільно (близько 4 с). Якщо за цей час
+    // піти в Сховище, його результати не мають домалюватись поверх — колись
+    // саме так сторінка й підмінялась під руками.
+    console.log("\n[10d] Пізні результати не підміняють сторінку");
+    await evalJs(`
+      document.querySelector('.navbtn[data-page=search]').click();
+      document.querySelector('#q').value = 'Kevin MacLeod';
+      document.querySelector('#searchForm').dispatchEvent(new Event('submit', {cancelable:true}));
+      return true;`);
+    await sleep(400);
+    await evalJs(`document.querySelector('.navbtn[data-page=library]').click(); return true`);
+    await sleep(9000);
+    const stayed = await evalJs(`
+      return {
+        page: state.page,
+        lib: document.querySelectorAll('.row[data-path]').length,
+        found: document.querySelectorAll('.row[data-key]').length,
+      };`);
+    check("Сховище лишилось на екрані",
+      stayed?.page === "library" && stayed.lib > 0 && stayed.found === 0,
+      `${stayed?.page}: файлів ${stayed?.lib}, знайденого ${stayed?.found}`);
+    check("а самі результати не загубились", (await evalJs(`
+      return state.results.songs.some(s => s.source === 'soundcloud');`)) === true);
 
     console.log("\n[11] Редактор тегів");
     await evalJs(`document.querySelector('.navbtn[data-page=library]').click(); return true`);
@@ -925,6 +1047,26 @@ function connect(url) {
     check("показано знайдені бінарники", (await until(`
       const t = document.querySelector('#binSet')?.textContent || '';
       return t.includes('yt-dlp') && t.includes('ffmpeg') ? true : null;`, 10, 300)) === true);
+    check("є керування оновленням yt-dlp", (await evalJs(`
+      return Boolean(document.querySelector('#ytdlpAuto') && document.querySelector('#ytdlpUpd'));`)) === true);
+    check("автооновлення yt-dlp увімкнене типово",
+      (await evalJs("return document.querySelector('#ytdlpAuto')?.checked")) === true);
+    // Не саме оновлення, а лише те, що ми справді питаємо GitHub і розуміємо
+    // відповідь: качати 17 МБ у тесті ні до чого.
+    //
+    // Заразом — головне: поки триває перевірка, вікно мусить лишатися живим.
+    // Перша версія цього коду питала версію yt-dlp синхронно, і оскільки
+    // yt-dlp.exe розпаковує сам себе кілька секунд, увесь застосунок на цей
+    // час замерзав: Сховище зависало на «читаю теги», кнопки не тиснулись.
+    const ver = await evalJs(`
+      const slow = window.api.ytdlpCheck().catch((e) => ({ err: e.message }));
+      const t = performance.now();
+      await window.api.getSettings();
+      const idle = performance.now() - t;
+      return { ...(await slow), idle: Math.round(idle) };`);
+    check("версію yt-dlp на GitHub видно",
+      /^\d{4}\.\d{2}\.\d{2}/.test(ver?.latest || ""), ver?.err || `${ver?.current} → ${ver?.latest}`);
+    check("перевірка оновлень не морозить вікно", ver?.idle < 1000, `звичайний виклик пройшов за ${ver?.idle} мс`);
     await shot("налаштування");
 
     console.log("\n[13] Помилки в консолі інтерфейсу");

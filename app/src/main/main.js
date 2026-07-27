@@ -12,9 +12,22 @@ const tags = require("./tags");
 const stream = require("./stream");
 const playlists = require("./playlists");
 const personal = require("./personal");
+const tools = require("./tools");
 const { Discord } = require("./discord");
 
 const discord = new Discord();
+
+/**
+ * Медіаклавіші на клавіатурі й навушниках та панель «зараз грає», яка в
+ * Windows виїжджає разом із гучністю. Chromium уміє це сам, але в Electron
+ * можливість вимкнена — вмикаємо явно, і саме тут: прапорці читаються ще до
+ * готовності застосунку, пізніше вони вже нічого не змінять.
+ *
+ * Свідомо не беремо globalShortcut: він забирає клавіші в усієї системи
+ * назавжди, тобто ламає їх для інших плеєрів. Тут же клавіші дістаються тому,
+ * хто грав останнім, — як і має бути.
+ */
+app.commandLine.appendSwitch("enable-features", "HardwareMediaKeyHandling,MediaSessionService");
 
 let win = null;
 
@@ -24,7 +37,7 @@ function createWindow() {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    backgroundColor: "#12121a",
+    backgroundColor: "#060607",
     title: "Music Grabber",
     show: false,
     webPreferences: {
@@ -106,6 +119,13 @@ function handle(channel, fn) {
 }
 
 handle("binaries:status", () => binaries.status());
+
+handle("tools:ytdlpCheck", () => tools.check());
+handle("tools:ytdlpUpdate", async () => {
+  const r = await tools.update();
+  settings.save({ ytdlpCheckedAt: Date.now() });
+  return r;
+});
 
 handle("search:query", async (query, sources, searchId) => {
   const q = String(query || "").trim();
@@ -331,6 +351,26 @@ function setupUpdates() {
 
 handle("app:version", () => app.getVersion());
 
+/**
+ * Тихе оновлення yt-dlp.
+ *
+ * Перша перевірка — не одразу: на старті й так качається головна сторінка та
+ * читається Сховище, і додавати до цього завантаження на 17 МБ нечесно.
+ * Далі — раз на шість годин, а сам модуль ще й тримає добову паузу, тож
+ * реально мережа турбується раз на добу.
+ */
+function setupToolUpdates() {
+  tools.sweepOld();
+
+  const tick = async () => {
+    const done = await tools.autoUpdate(settings);
+    if (done && win && !win.isDestroyed()) win.webContents.send("tools:ytdlp", done);
+  };
+
+  setTimeout(tick, 30 * 1000);
+  setInterval(tick, 6 * 60 * 60 * 1000);
+}
+
 // ------------------------------------------------------------------ буфер обміну
 
 const MUSIC_LINK =
@@ -381,6 +421,7 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     watchClipboard();
     setupUpdates();
+    setupToolUpdates();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });

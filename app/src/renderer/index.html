@@ -14,7 +14,7 @@
       <!-- ---------------------------------------------- ліва панель -->
       <aside class="nav">
         <div class="brand">
-          <span class="logo" data-icon="note"></span> Music&nbsp;Grabber
+          <span class="logo" data-icon="valknut"></span> Music&nbsp;Grabber
         </div>
 
         <button class="navbtn active" data-page="home">
@@ -106,7 +106,8 @@
       </div>
       <button class="pbtn small heart" id="plFav" title="В улюблене" data-icon="heart"></button>
       <button class="pbtn small" id="plRadio" title="Радіо за цим треком" data-icon="radio"></button>
-      <button class="pbtn small" id="plLyrics" title="Текст пісні" data-icon="lyrics"></button>
+      <button class="pbtn small" id="plQueue" title="Черга відтворення (Q)" data-icon="queue"></button>
+      <button class="pbtn small" id="plLyrics" title="Текст пісні (L)" data-icon="lyrics"></button>
       <span class="vico" data-icon="volume"></span>
       <input type="range" id="plVol" class="pvol" min="0" max="100" value="80" />
       <audio id="audio"></audio>
@@ -128,6 +129,18 @@
         <button class="ghost" id="lyricsClose" data-icon="close" title="Закрити"></button>
       </header>
       <div class="lbody" id="lyricsBody"></div>
+    </div>
+
+    <!-- Черга відтворення: що гратиме далі. Досі вона існувала лише всередині
+         програми, і подивитись на неї було ніяк. -->
+    <div class="lyrics queue" id="queuePanel" hidden>
+      <header>
+        <b>Черга відтворення</b>
+        <span class="grow"></span>
+        <span class="qcount" id="queueCount"></span>
+        <button class="ghost" id="queueClose" data-icon="close" title="Закрити"></button>
+      </header>
+      <div class="lbody" id="queueBody"></div>
     </div>
 
     <!-- Власне вікно вводу: window.prompt() в Electron не просто не працює,
