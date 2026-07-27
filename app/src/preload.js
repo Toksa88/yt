@@ -73,6 +73,9 @@ contextBridge.exposeInMainWorld("api", {
   getSettings: () => call("settings:get"),
   setSettings: (patch) => call("settings:set", patch),
 
+  setZoom: (z) => call("ui:zoom", z),
+  onZoom: (cb) => ipcRenderer.on("ui:zoom", (_e, z) => cb(z)),
+
   chooseFolder: () => call("dialog:folder"),
   reveal: (file) => call("shell:reveal", file),
   openFolder: (dir) => call("shell:openFolder", dir),

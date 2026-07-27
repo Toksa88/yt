@@ -1047,6 +1047,24 @@ function connect(url) {
     check("показано знайдені бінарники", (await until(`
       const t = document.querySelector('#binSet')?.textContent || '';
       return t.includes('yt-dlp') && t.includes('ffmpeg') ? true : null;`, 10, 300)) === true);
+    // Масштаб виставляє головний процес, тож перевіряємо не поле вибору, а те,
+    // що сторінка справді змінила розмір — і що вибір це пережив.
+    const zoomed = await evalJs(`
+      const sel = document.querySelector('#zoom');
+      const before = window.devicePixelRatio;
+      sel.value = '1.5';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 500));
+      return { before, after: window.devicePixelRatio, saved: (await window.api.getSettings()).zoom };`);
+    check("масштаб інтерфейсу справді змінює розмір",
+      zoomed?.after > zoomed?.before, `${zoomed?.before} → ${zoomed?.after}`);
+    check("і запам'ятовується в налаштуваннях", zoomed?.saved === 1.5, String(zoomed?.saved));
+    await evalJs(`
+      const sel = document.querySelector('#zoom');
+      sel.value = '1';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;`);
+
     check("є керування оновленням yt-dlp", (await evalJs(`
       return Boolean(document.querySelector('#ytdlpAuto') && document.querySelector('#ytdlpUpd'));`)) === true);
     check("автооновлення yt-dlp увімкнене типово",

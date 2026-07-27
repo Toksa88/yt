@@ -997,6 +997,27 @@ function renderSettings() {
       </div>
 
       <div class="set">
+        <h4>Масштаб інтерфейсу</h4>
+        <p>
+          На великому моніторі, де система працює без збільшення, усе виглядає дрібним.
+          Обране значення пам'ятається між запусками. Те саме роблять <b>Ctrl</b>&nbsp;+&nbsp;<b>=</b>
+          і <b>Ctrl</b>&nbsp;+&nbsp;<b>−</b>, а <b>Ctrl</b>&nbsp;+&nbsp;<b>0</b> повертає звичайний.
+        </p>
+        <div class="ctl">
+          <select id="zoom">
+            ${[0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2]
+              .map(
+                (z) =>
+                  `<option value="${z}"${Math.abs((s.zoom || 1) - z) < 0.01 ? " selected" : ""}>${Math.round(
+                    z * 100,
+                  )}%${z === 1 ? " — звичайний" : ""}</option>`,
+              )
+              .join("")}
+          </select>
+        </div>
+      </div>
+
+      <div class="set">
         <h4>Стежити за буфером обміну</h4>
         <p>Коли скопіюєш посилання на музику, програма запропонує його завантажити.</p>
         <div class="ctl">
@@ -2313,6 +2334,11 @@ mainEl.addEventListener("change", (e) => {
     state.settings.albumFolder = e.target.checked;
     window.api.setSettings({ albumFolder: e.target.checked });
   }
+  if (e.target.id === "zoom") {
+    const z = Number(e.target.value);
+    state.settings.zoom = z;
+    window.api.setZoom(z).catch(() => {});
+  }
   if (e.target.id === "ytdlpAuto") {
     state.settings.ytdlpAutoUpdate = e.target.checked;
     window.api.setSettings({ ytdlpAutoUpdate: e.target.checked });
@@ -2485,6 +2511,14 @@ window.api.onUpdateState((s) => {
     ],
     0,
   );
+});
+
+// Масштаб міняється ще й з клавіатури через меню — тримаємо вибір
+// у Налаштуваннях у згоді з дійсністю.
+window.api.onZoom((z) => {
+  state.settings.zoom = z;
+  const sel = $("#zoom");
+  if (sel) sel.value = String(z);
 });
 
 window.api.onClipboardLink((url) => {

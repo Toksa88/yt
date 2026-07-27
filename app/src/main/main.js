@@ -50,6 +50,10 @@ function createWindow() {
 
   win.once("ready-to-show", () => win.show());
 
+  // Масштаб можна виставляти лише готовій сторінці: до завантаження Electron
+  // його мовчки забуває.
+  win.webContents.once("did-finish-load", () => applyZoom(settings.load().zoom));
+
   // Помилки інтерфейсу інакше лишаються всередині вікна: якщо додаток
   // запущено з MG_DEBUG=1, вони йдуть у консоль, звідки їх видно.
   if (process.env.MG_DEBUG) {
@@ -67,6 +71,36 @@ function createWindow() {
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: "deny" };
   });
+}
+
+// ------------------------------------------------------------------ масштаб
+
+/** Кроки масштабу. Проміжних значень не даємо: вибирати з повзунка нема з чого. */
+const ZOOM_STEPS = [0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
+
+/**
+ * Виставляє масштаб інтерфейсу й запам'ятовує його.
+ *
+ * Робимо це в головному процесі, а не в самій сторінці: сторінці для цього
+ * потрібен webFrame, тобто доступ до Electron, а вона його свідомо не має.
+ */
+function applyZoom(value, save = false) {
+  const z = Math.min(2, Math.max(0.8, Number(value) || 1));
+  if (win && !win.isDestroyed()) {
+    win.webContents.setZoomFactor(z);
+    win.webContents.send("ui:zoom", z);
+  }
+  if (save) settings.save({ zoom: z });
+  return z;
+}
+
+/** @param {number} dir -1 менше, +1 більше */
+function stepZoom(dir) {
+  const now = settings.load().zoom || 1;
+  // Найближчий крок до поточного значення: масштаб міг прийти й з колеса миші.
+  let i = ZOOM_STEPS.reduce((best, z, k) => (Math.abs(z - now) < Math.abs(ZOOM_STEPS[best] - now) ? k : best), 0);
+  i = Math.min(ZOOM_STEPS.length - 1, Math.max(0, i + dir));
+  applyZoom(ZOOM_STEPS[i], true);
 }
 
 /**
@@ -94,9 +128,11 @@ function buildMenu() {
           { role: "reload", label: "Перезавантажити" },
           { role: "toggleDevTools", label: "Інструменти розробника" },
           { type: "separator" },
-          { role: "resetZoom", label: "Звичайний масштаб" },
-          { role: "zoomIn", label: "Більше" },
-          { role: "zoomOut", label: "Менше" },
+          // Не ролі zoomIn/zoomOut: вони міняють масштаб, але не пам'ятають
+          // його, і кожен запуск починався б із дрібного інтерфейсу знову.
+          { label: "Звичайний масштаб", accelerator: "CommandOrControl+0", click: () => applyZoom(1, true) },
+          { label: "Більше", accelerator: "CommandOrControl+=", click: () => stepZoom(1) },
+          { label: "Менше", accelerator: "CommandOrControl+-", click: () => stepZoom(-1) },
           { type: "separator" },
           { role: "togglefullscreen", label: "На весь екран" },
         ],
@@ -177,6 +213,8 @@ handle("dl:cancel", (id) => downloads.cancel(id));
 handle("dl:retry", (id) => downloads.retry(id));
 handle("dl:list", () => downloads.list());
 handle("dl:clear", () => downloads.clearFinished());
+
+handle("ui:zoom", (z) => applyZoom(z, true));
 
 handle("settings:get", () => settings.load());
 handle("settings:set", (patch) => settings.save(patch));

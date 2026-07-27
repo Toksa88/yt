@@ -32,6 +32,11 @@ const DEFAULTS = {
    */
   knownSources: [],
   watchClipboard: true,
+  /**
+   * Масштаб інтерфейсу. На великому моніторі зі стовідсотковим масштабом
+   * системи все виглядає дрібним, і кожен запуск починався б із Ctrl+«+».
+   */
+  zoom: 1,
   volume: 0.8,
   shuffle: false,
   repeat: "off",
