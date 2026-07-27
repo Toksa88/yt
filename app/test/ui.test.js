@@ -629,7 +629,7 @@ function connect(url) {
     // лише поклацавши кожен окремо.
     check("на сторінці виконавця є з чого почати", (await evalJs(`
       return [...document.querySelectorAll('[data-act="artist-play"]')].map(b => b.dataset.mode).join(',');`))
-      === "top,shuffle,all");
+      === "top,shuffle,all,radio");
 
     await evalJs(`document.querySelector('[data-act="artist-play"][data-mode=top]').click(); return true`);
     const top = await until(`
@@ -645,6 +645,14 @@ function connect(url) {
     // Інакше після кінця перемішаного списку порядок раптом ставав би звичайним.
     check("і вмикає сам режим перемішування", order?.shuffle === true);
     check("черга не загубилась", (await evalJs("return state.pq.list.length")) === top?.n, String(top?.n));
+
+    // Каталог YouTube Music під конкретним виконавцем буває куций — у нього
+    // може бути п'ять «своїх» треків при десятках записаних. Радіо — чесний
+    // вихід із цього, і воно мусить давати помітно більше.
+    await evalJs(`document.querySelector('[data-act="artist-play"][data-mode=radio]').click(); return true`);
+    const radio = await until(`
+      return state.pq.list.length > ${top?.n || 0} ? state.pq.list.length : null;`, 25, 700);
+    check("«Радіо» дає більшу чергу, ніж власні треки", radio > (top?.n || 0), `${radio} проти ${top?.n}`);
 
     console.log("\n[10c] Позначка «вже є» в пошуку");
     await evalJs(`
@@ -680,8 +688,12 @@ function connect(url) {
     check("Сховище лишилось на екрані",
       stayed?.page === "library" && stayed.lib > 0 && stayed.found === 0,
       `${stayed?.page}: файлів ${stayed?.lib}, знайденого ${stayed?.found}`);
-    check("а самі результати не загубились", (await evalJs(`
-      return state.results.songs.some(s => s.source === 'soundcloud');`)) === true);
+    // Чекаємо на відповідь, а не на секундомір: SoundCloud іде через yt-dlp і
+    // відповідає то за чотири секунди, то за п'ятнадцять. Суть перевірки в
+    // тому, що результат таки доїхав у пам'ять, поки людина була в Сховищі.
+    const merged = await until(`
+      return state.results.songs.some(s => s.source === 'soundcloud') ? true : null;`, 20, 1000);
+    check("а самі результати не загубились", merged === true);
 
     console.log("\n[11] Редактор тегів");
     await evalJs(`document.querySelector('.navbtn[data-page=library]').click(); return true`);

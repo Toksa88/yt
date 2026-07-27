@@ -461,8 +461,13 @@ function renderArtist(a) {
           </button>
           <button class="ghost" data-act="artist-play" data-mode="all"
                   ${a.albums?.length || a.singles?.length ? "" : "disabled"}
-                  title="Зібрати треки з усіх альбомів і синглів та ввімкнути їх упереміш">
+                  title="Зібрати усе, що YouTube Music знає за цим виконавцем, і ввімкнути впереміш">
             ${icon("note")} Усе впереміш
+          </button>
+          <button class="ghost" data-act="artist-play" data-mode="radio"
+                  ${a.topSongs?.length ? "" : "disabled"}
+                  title="Його трек і схоже на нього — коли власних записів у каталозі мало">
+            ${icon("radio")} Радіо
           </button>
           <button class="ghost" data-act="pick-all">Вибрати популярні треки</button>
         </div>
@@ -1558,57 +1563,95 @@ function shuffled(list) {
  * Досі сторінка виконавця показувала треки, але зібрати з них чергу можна
  * було тільки поклацавши кожен окремо.
  *
- * @param {"top"|"shuffle"|"all"} mode
+ * @param {"top"|"shuffle"|"all"|"radio"} mode
  *   top     — популярні, як їх подає YouTube Music;
  *   shuffle — ті самі, але впереміш;
- *   all     — усе, що знайдемо в альбомах і синглах, теж упереміш.
+ *   all     — усе його, що вдасться знайти, теж упереміш;
+ *   radio   — його трек і схоже на нього, від YouTube Music.
  */
 async function playArtist(mode) {
   const a = state.view?.type === "artist" ? state.view.data : null;
   if (!a) return;
 
+  if (mode === "radio") {
+    const seed = (a.topSongs || []).find((t) => videoIdOf(t));
+    if (!seed) return toast("Немає з чого будувати радіо: у цього виконавця нема треків YouTube Music.");
+    return startRadio(seed);
+  }
+
   let list = (a.topSongs || []).filter((t) => t.url);
 
   if (mode === "all") {
-    // Список альбомів приходить без треків — за кожним доводиться йти окремо.
-    // Тому це найповільніша з трьох кнопок, і про це чесно сказано в поступі.
-    const albums = [...(a.albums || []), ...(a.singles || [])].filter((x) => x.id);
     const seen = new Set(list.map((t) => t.id));
-    let done = 0;
+    const add = (songs) => {
+      for (const s of songs || []) {
+        if (!s.url || seen.has(s.id)) continue;
+        seen.add(s.id);
+        list.push(s);
+      }
+    };
 
+    // Список альбомів приходить без треків — за кожним доводиться йти окремо.
+    // Тому це найповільніша з кнопок, і про це чесно сказано в поступі.
+    //
+    // Частина «альбомів» насправді окремі відеокліпи: у них нуль треків, і це
+    // нормально, а не збій.
+    const albums = [...(a.albums || []), ...(a.singles || [])].filter((x) => x.id);
     for (let i = 0; i < albums.length; i += 4) {
       const part = await Promise.all(
         albums.slice(i, i + 4).map((al) => window.api.album(al.id).catch(() => null)),
       );
       // Пішли зі сторінки, поки збирали, — далі нема сенсу.
       if (state.view?.data !== a) return;
+      for (const got of part) add(got?.songs);
+      toast(
+        `Збираю треки: ${Math.min(i + 4, albums.length)} з ${albums.length} ${plural(albums.length, RELEASES)}…`,
+        [],
+        0,
+      );
+    }
 
-      for (const got of part) {
-        for (const s of got?.songs || []) {
-          if (!s.url || seen.has(s.id)) continue;
-          seen.add(s.id);
-          list.push(s);
-        }
-      }
-      done += part.length;
-      toast(`Збираю треки: ${done} з ${albums.length} ${plural(albums.length, RELEASES)}…`, [], 0);
+    // Каталог виконавця буває значно бідніший за звичайний пошук: у сторінки
+    // виконавця свій, куций список. Добираємо звідти, але лише те, що справді
+    // його — за ідентифікатором, а не за схожістю імені. Інакше в чергу
+    // «М8Л8ТХ» приїжджають M8, MOLOTH і Nezhegol.
+    try {
+      const r = await window.api.search(a.name, ["ytmusic"], `artist-${Date.now()}`);
+      if (state.view?.data !== a) return;
+      add((r.songs || []).filter((s) => s.artistId && s.artistId === a.id));
+    } catch {
+      /* пошук не додав нічого — обійдемось тим, що вже є */
     }
     hideToast();
   }
 
   if (!list.length) return toast("Не знайшлося жодного треку, який можна ввімкнути.");
 
-  if (mode !== "top") {
-    list = shuffled(list);
-    // Кнопка «перемішати» вмикає й сам режим: інакше після кінця списку
-    // порядок раптом ставав би звичайним.
-    state.shuffle = true;
-    syncModeBtns();
-    window.api.setSettings({ shuffle: true }).catch(() => {});
-  }
+  list = shuffled(list);
+  // Кнопка вмикає й сам режим перемішування: інакше після кінця списку
+  // порядок раптом ставав би звичайним.
+  state.shuffle = true;
+  syncModeBtns();
+  window.api.setSettings({ shuffle: true }).catch(() => {});
 
   play(list[0], list);
-  if (mode === "all") toast(`${plural(list.length, TRACKS)} у черзі`, [], 4000);
+
+  if (mode !== "all") return;
+
+  // Головне про цю кнопку: коли треків вийшло мало, це майже завжди не наша
+  // поломка, а бідний каталог — у YouTube Music просто немає решти під цим
+  // виконавцем. Мовчати про це не можна: людина бачить вісім треків у гурту,
+  // який записав десятки, і має право знати, чому.
+  if (list.length < 15) {
+    toast(
+      `Знайшлося лише ${plural(list.length, TRACKS)}. Більше YouTube Music під цим виконавцем не має — ` +
+        `решта його записів там або відсутня, або лежить окремими відео без прив'язки до нього.`,
+      [{ label: "Увімкнути радіо", primary: true, run: () => playArtist("radio") }],
+      12000,
+    );
+  } else {
+    toast(`${plural(list.length, TRACKS)} у черзі`, [], 4000);
+  }
 }
 
 async function openArtistById(id) {

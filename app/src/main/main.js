@@ -32,6 +32,9 @@ const discord = new Discord();
  */
 app.commandLine.appendSwitch("enable-features", "HardwareMediaKeyHandling,MediaSessionService");
 
+/** Наш знак. У зібраному застосунку теки build-assets немає — там іконка в exe. */
+const ICON = path.join(__dirname, "..", "..", "build-assets", "icon.ico");
+
 let win = null;
 
 /** Виходимо з програми: тоді зникле вікно — це норма, а не падіння. */
@@ -46,6 +49,11 @@ function createWindow() {
     backgroundColor: "#060607",
     title: "Music Grabber",
     show: false,
+    // Зібраний застосунок бере іконку з самого exe — її туди кладе
+    // electron-builder. А от при запуску з вихідних кодів exe наш — це
+    // electron.exe, і без цього рядка у панелі задач висить його власна
+    // іконка, хоч скільки перемальовуй свою.
+    ...(fs.existsSync(ICON) ? { icon: ICON } : {}),
     webPreferences: {
       preload: path.join(__dirname, "..", "preload.js"),
       contextIsolation: true,
