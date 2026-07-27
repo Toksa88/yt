@@ -1,6 +1,6 @@
 {
   "name": "music-grabber",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Пошук, прослуховування й завантаження музики з YouTube Music, YouTube та SoundCloud",
   "main": "src/main/main.js",
   "scripts": {
