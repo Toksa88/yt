@@ -1,5 +1,6 @@
 "use strict";
 
+const fs = require("fs");
 const path = require("path");
 const { app, BrowserWindow, ipcMain, dialog, shell, Menu, clipboard } = require("electron");
 
@@ -12,6 +13,8 @@ const tags = require("./tags");
 const stream = require("./stream");
 const playlists = require("./playlists");
 const personal = require("./personal");
+const store = require("./store");
+const session = require("./session");
 const tools = require("./tools");
 const { Discord } = require("./discord");
 
@@ -30,6 +33,9 @@ const discord = new Discord();
 app.commandLine.appendSwitch("enable-features", "HardwareMediaKeyHandling,MediaSessionService");
 
 let win = null;
+
+/** Виходимо з програми: тоді зникле вікно — це норма, а не падіння. */
+let quitting = false;
 
 function createWindow() {
   win = new BrowserWindow({
@@ -61,8 +67,9 @@ function createWindow() {
       const tag = ["log", "warn", "ERROR"][level] || level;
       console.log(`[renderer/${tag}] ${message}  (${String(src).split("/").pop()}:${line})`);
     });
-    win.webContents.on("render-process-gone", (_e, d) => console.log("[renderer] впав:", d.reason));
   }
+
+  win.webContents.on("render-process-gone", (_e, d) => onRendererGone(d));
   win.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
 
   // Посилання «відкрити на YouTube» мають іти в системний браузер,
@@ -71,6 +78,61 @@ function createWindow() {
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: "deny" };
   });
+}
+
+// ------------------------------------------------------------------ падіння вікна
+
+/**
+ * Скільки разів поспіль піднімаємо вікно після краху.
+ *
+ * Без межі програма з системною поломкою перезапускала б вікно нескінченно,
+ * і людина бачила б блимання замість чесного «зламалось».
+ */
+const MAX_REVIVALS = 3;
+let revivals = 0;
+
+/** Лічильник забувається, щойно вікно пожило нормально. */
+let reviveTimer = null;
+
+/**
+ * Вікно впало.
+ *
+ * Досі цього не ловив ніхто: у зібраній програмі порожнє вікно лишалось
+ * порожнім назавжди, без жодного слова, і виходу не було, крім диспетчера
+ * задач. Друг про таке не напише — він просто більше не відкриє програму.
+ *
+ * @param {{reason: string, exitCode: number}} d
+ */
+function onRendererGone(d) {
+  const note = `${new Date().toISOString()}  ${d?.reason || "?"}  код ${d?.exitCode}\n`;
+  try {
+    fs.appendFileSync(path.join(app.getPath("userData"), "crash.log"), note, "utf8");
+  } catch {
+    /* не змогли записати — принаймні спробуємо підняти вікно */
+  }
+  if (process.env.MG_DEBUG) console.log("[renderer] впав:", d?.reason, "код", d?.exitCode);
+
+  // Вихід із програми теж проходить через цю подію — там нічого не рятуємо.
+  if (quitting || !win || win.isDestroyed()) return;
+
+  if (++revivals > MAX_REVIVALS) {
+    dialog.showMessageBox(win, {
+      type: "error",
+      title: "Music Grabber",
+      message: "Інтерфейс падає знову й знову",
+      detail:
+        `Вікно вже піднімалось ${MAX_REVIVALS} рази поспіль і щоразу падало, тож більше не пробую — ` +
+        `інакше це блимало б без кінця.\n\nПричини записані у файл crash.log поруч із налаштуваннями. ` +
+        `Плейлисти, улюблене та історія не постраждали: вони живуть окремо від вікна.`,
+      buttons: ["Зрозуміло"],
+    });
+    return;
+  }
+
+  win.webContents.reload();
+  clearTimeout(reviveTimer);
+  // Хвилина без падінь означає, що це був поодинокий збій, а не петля.
+  reviveTimer = setTimeout(() => (revivals = 0), 60 * 1000);
 }
 
 // ------------------------------------------------------------------ масштаб
@@ -156,6 +218,18 @@ function handle(channel, fn) {
 
 handle("binaries:status", () => binaries.status());
 
+// Файли, які не прочитались цього запуску. Інтерфейс питає раз на старті:
+// мовчки почати з порожнього — це саме те, від чого ми тікаємо.
+handle("app:troubles", () => store.troubles());
+
+// Стан відтворення: вікно шле його при змінах, а після перезавантаження —
+// свого чи після запуску програми — забирає назад.
+handle("session:save", (state) => {
+  session.save(state);
+  return true;
+});
+handle("session:restore", () => session.restore());
+
 handle("tools:ytdlpCheck", () => tools.check());
 handle("tools:ytdlpUpdate", async () => {
   const r = await tools.update();
@@ -198,6 +272,7 @@ handle("search:soundcloud", (query, searchId) => search.soundcloudOnly(query, se
 
 handle("search:album", (id) => search.getAlbum(id));
 handle("search:artist", (id) => search.getArtist(id));
+handle("search:artistByName", (name) => search.findArtist(name));
 handle("search:resolveCatalog", (item) => search.resolveCatalogItem(item));
 handle("search:mbReleases", (mbid) => search.musicbrainzReleases(mbid));
 
@@ -463,6 +538,13 @@ if (!app.requestSingleInstanceLock()) {
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
+  });
+
+  // Останні секунди відтворення інакше лишились би в пам'яті: запис на диск
+  // притлумлено за часом, і без цього таймер не встигав би спрацювати.
+  app.on("before-quit", () => {
+    quitting = true;
+    session.flush();
   });
 
   app.on("window-all-closed", () => {

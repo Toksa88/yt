@@ -1,8 +1,8 @@
 "use strict";
 
-const fs = require("fs");
 const path = require("path");
 const { app } = require("electron");
+const store = require("./store");
 
 const FILE = () => path.join(app.getPath("userData"), "settings.json");
 
@@ -63,12 +63,12 @@ let cache = null;
 
 function load() {
   if (cache) return cache;
-  let saved = {};
-  try {
-    saved = JSON.parse(fs.readFileSync(FILE(), "utf8"));
-  } catch {
-    /* перший запуск або зіпсований файл — беремо типові значення */
-  }
+  // Налаштування — єдине з трьох, що не шкода: усе тут має типове значення,
+  // і зіпсований файл коштує лише кількох галочок.
+  const saved = store.readJson(FILE(), {
+    fallback: {},
+    valid: (v) => v && typeof v === "object" && !Array.isArray(v),
+  });
   cache = { ...DEFAULTS, ...saved };
   if (!cache.outDir) cache.outDir = path.join(app.getPath("music"), "Завантажено");
 
@@ -91,12 +91,7 @@ function load() {
 
 function save(patch) {
   cache = { ...load(), ...patch };
-  try {
-    fs.mkdirSync(path.dirname(FILE()), { recursive: true });
-    fs.writeFileSync(FILE(), JSON.stringify(cache, null, 2), "utf8");
-  } catch {
-    /* не змогли записати — налаштування просто не переживуть перезапуск */
-  }
+  store.writeJson(FILE(), cache);
   return cache;
 }
 

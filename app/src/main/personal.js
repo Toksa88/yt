@@ -8,9 +8,9 @@
  * вподобання нікуди було б записати.
  */
 
-const fs = require("fs");
 const path = require("path");
 const { app } = require("electron");
+const store = require("./store");
 
 const FILE = () => path.join(app.getPath("userData"), "personal.json");
 
@@ -21,25 +21,19 @@ let cache = null;
 
 function load() {
   if (cache) return cache;
-  try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), "utf8"));
-    cache = {
-      favorites: Array.isArray(raw.favorites) ? raw.favorites : [],
-      history: Array.isArray(raw.history) ? raw.history : [],
-    };
-  } catch {
-    cache = { favorites: [], history: [] }; // перший запуск або зіпсований файл
-  }
+  const raw = store.readJson(FILE(), {
+    fallback: { favorites: [], history: [] },
+    valid: (v) => v && Array.isArray(v.favorites) && Array.isArray(v.history),
+  });
+  cache = {
+    favorites: Array.isArray(raw.favorites) ? raw.favorites : [],
+    history: Array.isArray(raw.history) ? raw.history : [],
+  };
   return cache;
 }
 
 function save() {
-  try {
-    fs.mkdirSync(path.dirname(FILE()), { recursive: true });
-    fs.writeFileSync(FILE(), JSON.stringify(cache, null, 2), "utf8");
-  } catch {
-    /* не змогли записати — переживе лише до перезапуску */
-  }
+  store.writeJson(FILE(), cache);
   return cache;
 }
 

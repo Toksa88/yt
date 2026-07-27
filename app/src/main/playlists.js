@@ -11,10 +11,10 @@
  * на треки при завантаженні, щоб уже створені плейлисти не загубились.
  */
 
-const fs = require("fs");
 const path = require("path");
 const { app } = require("electron");
 const personal = require("./personal");
+const store = require("./store");
 
 const FILE = () => path.join(app.getPath("userData"), "playlists.json");
 
@@ -42,12 +42,7 @@ function upgrade(entry) {
 
 function load() {
   if (cache) return cache;
-  try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), "utf8"));
-    cache = Array.isArray(raw) ? raw : [];
-  } catch {
-    cache = []; // перший запуск або зіпсований файл
-  }
+  cache = store.readJson(FILE(), { fallback: [], valid: Array.isArray });
   for (const p of cache) {
     p.tracks = (p.tracks || []).map(upgrade).filter(Boolean);
     const n = Number(String(p.id).replace(/\D/g, ""));
@@ -57,12 +52,7 @@ function load() {
 }
 
 function save() {
-  try {
-    fs.mkdirSync(path.dirname(FILE()), { recursive: true });
-    fs.writeFileSync(FILE(), JSON.stringify(cache, null, 2), "utf8");
-  } catch {
-    /* не змогли записати — плейлисти не переживуть перезапуск */
-  }
+  store.writeJson(FILE(), cache);
   return cache;
 }
 

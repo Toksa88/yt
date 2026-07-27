@@ -37,11 +37,18 @@ async function getText(url, timeout = 15000) {
   }
 }
 
-async function fromSpotify(url) {
-  const [, kind, id] = url.match(SPOTIFY);
-  // Сторінка самого Spotify малюється скриптом і в HTML порожня, а от
-  // сторінка вбудованого плеєра віддає всі дані звичайним JSON усередині.
-  const html = await getText(`https://open.spotify.com/embed/${kind}/${id}`);
+/**
+ * Розбір сторінки вбудованого плеєра Spotify.
+ *
+ * Винесено окремо від завантаження навмисно: це найкрихкіше місце програми —
+ * ми читаємо чужу розмітку, яку ніхто не зобов'язувався тримати незмінною.
+ * Окремою функцією її можна перевірити на збереженому зразку, не ходячи
+ * щоразу в мережу.
+ *
+ * @param {string} html сторінка /embed/
+ * @param {"track"|"album"|"playlist"} kind
+ */
+function parseSpotify(html, kind) {
   const m = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
   if (!m) throw new Error("Spotify не віддав дані про це посилання");
 
@@ -76,8 +83,24 @@ async function fromSpotify(url) {
   };
 }
 
-async function fromApple(url) {
-  const html = await getText(url);
+/**
+ * Завантажує сторінку вбудованого плеєра Spotify.
+ *
+ * Сторінка самого Spotify малюється скриптом і в HTML порожня, а от сторінка
+ * плеєра віддає всі дані звичайним JSON усередині.
+ */
+async function fromSpotify(url) {
+  const [, kind, id] = url.match(SPOTIFY);
+  return parseSpotify(await getText(`https://open.spotify.com/embed/${kind}/${id}`), kind);
+}
+
+/**
+ * Розбір сторінки Apple Music.
+ *
+ * Тут беремо лише мітки og: сам треклист Apple віддає скриптом, а мітки є
+ * завжди й міняються рідше. Винесено окремо з тієї ж причини, що й Spotify.
+ */
+function parseApple(html) {
   const og = (p) =>
     (html.match(new RegExp(`<meta[^>]+property="og:${p}"[^>]+content="([^"]*)"`, "i")) || [])[1] ||
     (html.match(new RegExp(`<meta[^>]+content="([^"]*)"[^>]+property="og:${p}"`, "i")) || [])[1] ||
@@ -107,9 +130,11 @@ async function fromApple(url) {
 async function resolve(url) {
   const p = provider(url);
   if (!p) return null;
-  const data = p === "spotify" ? await fromSpotify(url) : await fromApple(url);
+  const data = p === "spotify" ? await fromSpotify(url) : parseApple(await getText(url));
   data.providerName = PROVIDER_NAME[p];
   return data;
 }
 
-module.exports = { provider, resolve, PROVIDER_NAME, MAX_ITEMS };
+// parseSpotify/parseApple експортуються заради тестів: перевіряти розбір
+// чужої розмітки, ходячи щоразу в мережу, — ненадійно й повільно.
+module.exports = { provider, resolve, parseSpotify, parseApple, PROVIDER_NAME, MAX_ITEMS };

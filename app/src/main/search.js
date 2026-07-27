@@ -740,6 +740,33 @@ async function resolveCatalogItem(item) {
   return getAlbum(hit.albumId);
 }
 
+/**
+ * Виконавець за іменем.
+ *
+ * У треків із YouTube Music ідентифікатор виконавця приходить одразу, і туди
+ * можна йти напряму. А от SoundCloud, файли з диска й посилання знають лише
+ * ім'я — для них єдиний шлях до сторінки виконавця саме цей.
+ *
+ * Беремо тільки точний збіг або чітке входження: показати чужого виконавця
+ * замість того, на кого натиснули, гірше, ніж чесно сказати «не знайшли».
+ */
+async function findArtist(name) {
+  const q = String(name || "").trim();
+  if (!q) return null;
+
+  const y = await ytm();
+  const found = await y.searchArtists(q);
+  const want = normTitle(q);
+  const hit =
+    found.find((a) => normTitle(a.name) === want) ||
+    found.find((a) => {
+      const got = normTitle(a.name);
+      return got.includes(want) || want.includes(got);
+    });
+
+  return hit ? getArtist(hit.artistId) : null;
+}
+
 /** Окремий вхід для SoundCloud — щоб він не гальмував решту пошуку. */
 async function soundcloudOnly(query, searchId) {
   begin(searchId);
@@ -764,8 +791,15 @@ module.exports = {
   bridgeProvider: bridge.provider,
   getAlbum,
   getArtist,
+  findArtist,
   resolveCatalogItem,
   musicbrainzReleases,
   resolveUrl,
   looksLikeUrl,
+  // Чисті перетворювачі — назовні лише заради тестів. Кожен з них колись
+  // ламався на живому: тривалість «2:18» рядком, обкладинка без розміру,
+  // назва з «(feat. …)», через яку трек не знаходився в мості.
+  mmss,
+  normTitle,
+  biggestThumb,
 };

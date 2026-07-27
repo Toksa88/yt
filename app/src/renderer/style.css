@@ -1132,6 +1132,20 @@ h3.sec .ic {
   background: var(--panel);
   margin-bottom: 10px;
 }
+/* Улюблене стоїть першим і має читатись як закріплене, а не як ще один
+   плейлист у списку. */
+.plcard.fav {
+  border: 1px solid var(--line);
+  background: linear-gradient(90deg, var(--accent-soft), transparent 70%), var(--panel);
+}
+.plcard.fav .pic {
+  background: transparent;
+  color: var(--accent-2);
+}
+.plcard.fav .pic .ic {
+  width: 28px;
+  height: 28px;
+}
 .plcard .pic {
   display: grid;
   place-items: center;
@@ -1239,6 +1253,32 @@ h3.sec .ic {
   white-space: pre-wrap;
   word-break: break-word;
   color: #d8cbe8;
+}
+
+/* ---------------------------------------------- ім'я виконавця як посилання */
+
+/* Виглядає як звичайний текст, доки на нього не навели: підкреслені імена в
+   кожному рядку перетворили б список на кашу. Кнопкою воно є заради
+   клавіатури — по Tab до нього можна дійти, як і належить посиланню. */
+.alink {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+.alink:hover:not(:disabled),
+.alink:focus-visible {
+  background: none;
+  color: var(--accent-2);
+  text-decoration: underline;
+}
+.alink:active:not(:disabled) {
+  transform: none;
 }
 
 /* ---------------------------------------------- черга відтворення */

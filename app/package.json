@@ -6,11 +6,17 @@
   "scripts": {
     "start": "electron .",
     "bins": "node scripts/fetch-bins.js",
+    "icon": "node scripts/make-icon.js",
     "prebuild": "node scripts/fetch-bins.js",
     "prerelease": "node scripts/fetch-bins.js",
     "build": "electron-builder --win",
     "release": "electron-builder --win --publish always",
-    "test": "node test/download.test.js && node test/ui.test.js",
+    "test": "npm run test:fast && npm run test:live",
+    "test:fast": "node test/store.test.js && node test/parse.test.js && node test/args.test.js",
+    "test:live": "node test/download.test.js && node test/ui.test.js",
+    "test:store": "node test/store.test.js",
+    "test:parse": "node test/parse.test.js",
+    "test:args": "node test/args.test.js",
     "test:download": "node test/download.test.js",
     "test:ui": "node test/ui.test.js"
   },

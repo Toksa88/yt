@@ -81,6 +81,7 @@ function plural(n, forms) {
 
 const TRACKS = ["трек", "треки", "треків"];
 const FILES = ["файл", "файли", "файлів"];
+const RELEASES = ["релізу", "релізів", "релізів"];
 
 const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
 const ownKey = (artist, title) => `${norm(artist)}|${norm(title)}`;
@@ -99,6 +100,49 @@ const SRC_NAME = {
   url: "посилання",
   bridge: "не знайдено",
 };
+
+/**
+ * Ім'я виконавця як шлях на його сторінку.
+ *
+ * Раніше воно було просто текстом, і потрапити від треку до всього іншого,
+ * що цей виконавець записав, було ніяк — доводилось копіювати ім'я в пошук.
+ *
+ * У треків YouTube Music ідентифікатор уже є, тож туди йдемо напряму. Решті
+ * (SoundCloud, файли з диска) лишається ім'я — його шукаємо в каталозі.
+ */
+function artistLink(t) {
+  const name = String(t?.artist || "").trim();
+  if (!name) return "невідомий виконавець";
+  return (
+    `<button class="alink" data-act="artist-of" data-name="${esc(name)}"` +
+    `${t.artistId ? ` data-id="${esc(t.artistId)}"` : ""}>${esc(name)}</button>`
+  );
+}
+
+/**
+ * Назва альбому як шлях далі — але шлях різний, і це навмисно.
+ *
+ * У Шукачі ти дивишся в каталог, тож альбом веде в каталог. У Сховищі ти
+ * дивишся на власний диск, і клікнувши альбом, майже напевно хочеш побачити
+ * свої файли з нього — які є, а яких бракує, — а не йти в мережу дивитись,
+ * як він виглядає в YouTube.
+ *
+ * Так, однаковий на вигляд текст робить різні речі в різних місцях. Але
+ * програма вже провела цю межу твердо: Сховище є диск, Шукач є каталог.
+ * Посилання веде в той світ, у якому ти стоїш.
+ *
+ * @param {object} t трек
+ * @param {"catalog"|"local"} where
+ */
+function albumLink(t, where) {
+  const name = String(t?.album || "").trim();
+  if (!name) return "";
+  return (
+    `<button class="alink" data-act="album-of" data-where="${where}" data-name="${esc(name)}"` +
+    `${t.albumId ? ` data-id="${esc(t.albumId)}"` : ""}` +
+    `${t.artist ? ` data-artist="${esc(t.artist)}"` : ""}>${esc(name)}</button>`
+  );
+}
 
 function badge(src) {
   return `<span class="badge ${esc(src)}">${esc(SRC_NAME[src] || src)}</span>`;
@@ -306,9 +350,9 @@ function songRow(s) {
       ${img(s.thumb, "art")}
       <div class="name">
         <b>${esc(s.title)}${badge(s.missing ? "bridge" : s.source)}${owned ? `<span class="badge owned">вже є</span>` : ""}</b>
-        <span class="sub">${esc(s.artist)}</span>
+        <span class="sub">${artistLink(s)}</span>
       </div>
-      <div class="alb">${esc(s.album || "")}</div>
+      <div class="alb">${albumLink(s, "catalog")}</div>
       <div class="dur">${dur(s.duration)}</div>
       <div class="act">
         ${dead ? "" : `<button data-act="listen" class="ghost iconbtn" title="Послухати не завантажуючи">${icon("play")}</button>`}
@@ -408,7 +452,20 @@ function renderArtist(a) {
       <div class="meta">
         <div class="sub">Виконавець ${badge(a.source)}</div>
         <h1>${esc(a.name)}</h1>
-        <div class="btns"><button class="ghost" data-act="pick-all">Вибрати популярні треки</button></div>
+        <div class="btns">
+          <button class="primary" data-act="artist-play" data-mode="top" ${a.topSongs?.length ? "" : "disabled"}>
+            ${icon("play")} Слухати популярні
+          </button>
+          <button class="ghost" data-act="artist-play" data-mode="shuffle" ${a.topSongs?.length ? "" : "disabled"}>
+            ${icon("shuffle")} Перемішати
+          </button>
+          <button class="ghost" data-act="artist-play" data-mode="all"
+                  ${a.albums?.length || a.singles?.length ? "" : "disabled"}
+                  title="Зібрати треки з усіх альбомів і синглів та ввімкнути їх упереміш">
+            ${icon("note")} Усе впереміш
+          </button>
+          <button class="ghost" data-act="pick-all">Вибрати популярні треки</button>
+        </div>
       </div>
     </div>
     ${sec("Популярні треки", a.topSongs?.length ? `<div class="rows">${a.topSongs.map(songRow).join("")}</div>` : "")}
@@ -521,11 +578,11 @@ function libRow(t) {
       ${img(null, "art", `data-cover="${esc(t.path)}"`)}
       <div class="name">
         <b>${esc(t.title)}</b>
-        <span class="sub">${esc(t.artist || "невідомий виконавець")}${
+        <span class="sub">${artistLink(t)}${
           t.bitrate ? `<span class="badge url">${t.ext} ${t.bitrate} kb/s</span>` : ""
         }</span>
       </div>
-      <div class="alb">${esc(t.album || "")}</div>
+      <div class="alb">${albumLink(t, "local")}</div>
       <div class="dur">${dur(t.duration)}</div>
       <div class="act">
         <button data-lact="play" class="primary iconbtn">${icon(isPlaying && !audio.paused ? "pause" : "play")}</button>
@@ -689,6 +746,16 @@ function mixCard(m) {
     </div>`;
 }
 
+/** Виконавець, якого ти справді слухаєш, — плитка з власної історії. */
+function myArtistCard(a) {
+  return `
+    <div class="card round" data-act="artist-of" data-name="${esc(a.name)}">
+      ${img(a.thumb || avatar(a.name), "cover")}
+      <div class="t">${esc(a.name)}</div>
+      <div class="s">${plural(a.n, TRACKS)} прослухано</div>
+    </div>`;
+}
+
 function renderHome() {
   $("#tabs").hidden = true;
   const H = state.home;
@@ -697,16 +764,29 @@ function renderHome() {
   if (H.error) return fail("Не вдалося прочитати головну: " + H.error);
 
   // Своє — вище чужого: те, що ти слухав, важливіше за чужі чарти.
-  const hist = state.history.slice(0, 12);
+  const hist = state.history.slice(0, 8);
   const mine = hist.length
     ? `<h3 class="sec">${icon("clock")} Нещодавно слухав` +
       `<button class="ghost tiny" data-hact="histclear">Очистити</button></h3>` +
       `<div class="rows">${hist.map(histRow).join("")}</div>`
     : "";
 
+  // Рекомендації, зібрані з твоєї ж історії. Чужі чарти йдуть після них:
+  // «що популярне у світі» цікавіше за «що любиш ти» хіба що першого дня.
+  const personal = (H.personal || [])
+    .map((s) => {
+      if (s.songs) {
+        reindex(s.songs);
+        return `<h3 class="sec">${esc(s.title)}</h3><div class="rows">${s.songs.map(songRow).join("")}</div>`;
+      }
+      return `<h3 class="sec">${esc(s.title)}</h3><div class="grid">${s.artists.map(myArtistCard).join("")}</div>`;
+    })
+    .join("");
+
   mainEl.innerHTML =
     `<h1 class="page">Головна</h1>` +
     mine +
+    personal +
     (H.sections.length
       ? H.sections
           .map(
@@ -717,6 +797,48 @@ function renderHome() {
       : `<div class="note">Порожньо. Перевір інтернет і онови сторінку.</div>`);
 }
 
+/**
+ * Персональні добірки з власної історії.
+ *
+ * YouTube Music віддає нам головну сторінку невідомо для кого: ми ходимо до
+ * нього без облікового запису, тож там чарти й «популярне в країні». Єдине,
+ * що знає саме про тебе, — історія на цьому комп'ютері. З неї й будуємо:
+ * радіо за останнім прослуханим і список виконавців, до яких ти вертаєшся.
+ *
+ * Помилки тут навмисно мовчазні: не вийшло — просто не буде цих секцій.
+ */
+async function loadPersonal() {
+  const H = state.home;
+  H.personal = [];
+  if (!state.history.length) return;
+
+  const seed = state.history.find((t) => videoIdOf(t));
+  if (seed) {
+    try {
+      const id = videoIdOf(seed);
+      const list = (await window.api.radio(id)).filter((t) => videoIdOf(t) !== id);
+      if (list.length) {
+        H.personal.push({ title: `Бо ти слухав «${seed.title}»`, songs: list.slice(0, 8) });
+      }
+    } catch {
+      /* радіо не зібралось — не біда */
+    }
+  }
+
+  const seen = new Map();
+  for (const t of state.history) {
+    const name = String(t.artist || "").trim();
+    if (!name) continue;
+    const key = norm(name);
+    const cur = seen.get(key) || { name, thumb: null, n: 0 };
+    cur.n++;
+    if (!cur.thumb) cur.thumb = t.thumb || null;
+    seen.set(key, cur);
+  }
+  const top = [...seen.values()].sort((a, b) => b.n - a.n).slice(0, 8);
+  if (top.length) H.personal.push({ title: "Виконавці, яких ти слухаєш", artists: top });
+}
+
 async function loadHome(force = false) {
   const H = state.home;
   if (H.loading || (H.loaded && !force)) return;
@@ -724,7 +846,10 @@ async function loadHome(force = false) {
   H.error = null;
   if (state.page === "home") render();
   try {
-    H.sections = await window.api.home();
+    // Своє й чуже тягнемо разом: персональні добірки не мають чекати, поки
+    // YouTube віддасть свої чарти, і навпаки — падіння одного не забирає інше.
+    const [sections] = await Promise.all([window.api.home(), loadPersonal()]);
+    H.sections = sections;
     H.loaded = true;
   } catch (e) {
     H.error = e.message;
@@ -786,6 +911,30 @@ async function startRadio(track) {
  * що збережено. Файл, якого зараз немає на диску, не викидаємо: диск могли
  * просто від'єднати.
  */
+/**
+ * Улюблене — плейлист, якого не існує.
+ *
+ * Сердечко працювало від самого початку, дані чесно лягали на диск, а
+ * подивитись на них у програмі не можна було ніде: `state.favs` тримав самі
+ * ключі, щоб залити сердечка, і на цьому все. Людина тиснула сердечко
+ * десять разів, а потім не могла знайти жодного з тих треків.
+ *
+ * Робимо його плейлистом, а не сьомим розділом: плейлисти вже вміють усе
+ * потрібне — приймають незавантажені треки, грають усе підряд, докачують
+ * відсутнє. Так само влаштовано і в Spotify: «Улюблені треки» закріплені
+ * першим рядком серед плейлистів, а не живуть окремо.
+ */
+const FAV_ID = "__fav__";
+
+function favPlaylist() {
+  return { id: FAV_ID, name: "Улюблене", tracks: state.favTracks || [], virtual: true };
+}
+
+/** Плейлист за ідентифікатором — разом з улюбленим, якого в списку немає. */
+function plById(id) {
+  return id === FAV_ID ? favPlaylist() : state.playlists.find((p) => p.id === id);
+}
+
 function plTracks(pl) {
   return (pl?.tracks || []).map((t) => {
     if (!t.path) return t;
@@ -797,7 +946,7 @@ function renderPlaylists() {
   $("#tabs").hidden = true;
 
   if (state.openPl) {
-    const pl = state.playlists.find((p) => p.id === state.openPl);
+    const pl = state.openPl === FAV_ID ? favPlaylist() : state.playlists.find((p) => p.id === state.openPl);
     if (!pl) {
       state.openPl = null;
       return renderPlaylists();
@@ -818,8 +967,14 @@ function renderPlaylists() {
                 title="${toGrab.length ? `Завантажити ${plural(toGrab.length, TRACKS)}` : "Усе вже на диску"}">
           ${icon("download")} ЗАБИРАЮ ВСЕ!
         </button>
-        <button class="ghost" data-plact="rename" data-id="${esc(pl.id)}">Перейменувати</button>
-        <button class="ghost danger" data-plact="delete" data-id="${esc(pl.id)}">Видалити</button>
+        ${
+          // Улюблене не перейменовується й не видаляється: воно не створене
+          // людиною, а зібралось саме з натиснутих сердечок.
+          pl.virtual
+            ? ""
+            : `<button class="ghost" data-plact="rename" data-id="${esc(pl.id)}">Перейменувати</button>
+               <button class="ghost danger" data-plact="delete" data-id="${esc(pl.id)}">Видалити</button>`
+        }
       </div>
       <div class="note">${plural(tracks.length, TRACKS)}${
         lost ? ` · ${plural(lost, ["файл не знайдено", "файли не знайдено", "файлів не знайдено"])}` : ""
@@ -827,9 +982,12 @@ function renderPlaylists() {
       ${
         tracks.length
           ? `<div class="rows">${tracks.map((t) => plTrackRow(t, pl.id)).join("")}</div>`
-          : `<div class="note info">Порожньо. Треки додаються зі <b>Сховища</b>: наведи на трек
-               і тисни «У плейлист», або постав галочки на кількох одразу — тоді кнопка
-               з'явиться внизу екрана.</div>`
+          : pl.virtual
+            ? `<div class="note info">Порожньо. Тисни сердечко на будь-якому треку — у пошуку,
+                 у Сховищі чи прямо в плеєрі, — і він з'явиться тут. Клавіша <b>F</b> робить те саме.</div>`
+            : `<div class="note info">Порожньо. Треки додаються зі <b>Сховища</b>: наведи на трек
+                 і тисни «У плейлист», або постав галочки на кількох одразу — тоді кнопка
+                 з'явиться внизу екрана.</div>`
       }`;
     loadCovers();
     return;
@@ -840,6 +998,22 @@ function renderPlaylists() {
       <h1>Плейлисти</h1>
       <span class="grow"></span>
       <button class="primary" data-plact="new">Створити плейлист</button>
+    </div>
+    <div class="plcard fav">
+      <div class="pic">${icon("heartOn")}</div>
+      <div class="who" data-plact="open" data-id="${FAV_ID}">
+        <b>Улюблене</b>
+        <small>${
+          state.favTracks?.length
+            ? plural(state.favTracks.length, TRACKS)
+            : "поки порожньо — тисни сердечко на будь-якому треку"
+        }</small>
+      </div>
+      <div class="pact">
+        <button class="primary iconbtn" data-plact="playpl" data-id="${FAV_ID}" ${
+          state.favTracks?.length ? "" : "disabled"
+        }>${icon("play")}</button>
+      </div>
     </div>
     ${
       state.playlists.length
@@ -1321,6 +1495,122 @@ async function openAlbum(item) {
   }
 }
 
+/**
+ * Перехід на сторінку виконавця звідусіль — зі Сховища, з Головної, з
+ * плейлиста. Сторінки виконавця живуть у розділі «Шукач», тож туди й
+ * переносимо, інакше вона намалювалася б і зникла з наступним перемальовуванням.
+ */
+function gotoArtistPage(data) {
+  toSearchPage();
+  state.view = { type: "artist", data };
+  render();
+}
+
+/** Переносить у розділ «Шукач»: сторінки виконавців і альбомів живуть там. */
+function toSearchPage() {
+  state.page = "search";
+  $$(".navbtn").forEach((b) => b.classList.toggle("active", b.dataset.page === "search"));
+}
+
+/** Показує свої файли цього альбому — фільтром Сховища, без походу в мережу. */
+function showLocalAlbum(name) {
+  state.libFilter = name;
+  state.page = "library";
+  $$(".navbtn").forEach((b) => b.classList.toggle("active", b.dataset.page === "library"));
+  loadLibrary();
+  render();
+}
+
+/** @param {{id?: string, name: string}} who */
+async function openArtistOf(who) {
+  toSearchPage();
+  state.view = { type: "results" };
+  render();
+  loading(`Відкриваю ${who.name}…`);
+  try {
+    const a = who.id ? await window.api.artist(who.id) : await window.api.artistByName(who.name);
+    if (!a) {
+      mainEl.innerHTML =
+        `<button class="ghost back" data-act="back">${icon("back")} Назад</button>` +
+        `<div class="note">У каталозі YouTube Music виконавця «${esc(who.name)}» знайти не вдалося. ` +
+        `Таке буває з тим, що завантажене з SoundCloud або перейменоване вручну.</div>`;
+      return;
+    }
+    gotoArtistPage(a);
+  } catch (e) {
+    fail("Не вдалося відкрити виконавця: " + e.message);
+  }
+}
+
+/** Перемішує на місці. Той самий алгоритм, що й у режимі «перемішати». */
+function shuffled(list) {
+  const a = [...list];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/**
+ * Слухати виконавця одним рухом.
+ *
+ * Досі сторінка виконавця показувала треки, але зібрати з них чергу можна
+ * було тільки поклацавши кожен окремо.
+ *
+ * @param {"top"|"shuffle"|"all"} mode
+ *   top     — популярні, як їх подає YouTube Music;
+ *   shuffle — ті самі, але впереміш;
+ *   all     — усе, що знайдемо в альбомах і синглах, теж упереміш.
+ */
+async function playArtist(mode) {
+  const a = state.view?.type === "artist" ? state.view.data : null;
+  if (!a) return;
+
+  let list = (a.topSongs || []).filter((t) => t.url);
+
+  if (mode === "all") {
+    // Список альбомів приходить без треків — за кожним доводиться йти окремо.
+    // Тому це найповільніша з трьох кнопок, і про це чесно сказано в поступі.
+    const albums = [...(a.albums || []), ...(a.singles || [])].filter((x) => x.id);
+    const seen = new Set(list.map((t) => t.id));
+    let done = 0;
+
+    for (let i = 0; i < albums.length; i += 4) {
+      const part = await Promise.all(
+        albums.slice(i, i + 4).map((al) => window.api.album(al.id).catch(() => null)),
+      );
+      // Пішли зі сторінки, поки збирали, — далі нема сенсу.
+      if (state.view?.data !== a) return;
+
+      for (const got of part) {
+        for (const s of got?.songs || []) {
+          if (!s.url || seen.has(s.id)) continue;
+          seen.add(s.id);
+          list.push(s);
+        }
+      }
+      done += part.length;
+      toast(`Збираю треки: ${done} з ${albums.length} ${plural(albums.length, RELEASES)}…`, [], 0);
+    }
+    hideToast();
+  }
+
+  if (!list.length) return toast("Не знайшлося жодного треку, який можна ввімкнути.");
+
+  if (mode !== "top") {
+    list = shuffled(list);
+    // Кнопка «перемішати» вмикає й сам режим: інакше після кінця списку
+    // порядок раптом ставав би звичайним.
+    state.shuffle = true;
+    syncModeBtns();
+    window.api.setSettings({ shuffle: true }).catch(() => {});
+  }
+
+  play(list[0], list);
+  if (mode === "all") toast(`${plural(list.length, TRACKS)} у черзі`, [], 4000);
+}
+
 async function openArtistById(id) {
   loading("Відкриваю виконавця…");
   try {
@@ -1476,6 +1766,9 @@ function favBtn(t) {
 async function toggleFav(track) {
   if (!track || !trackKey(track)) return;
   const r = await window.api.favToggle(track);
+  // Ключі — щоб заливати сердечка, самі треки — щоб було що показати на
+  // сторінці «Улюблене». Раніше зберігались тільки ключі, і сторінки не було.
+  state.favTracks = r.favorites;
   state.favs = new Set(r.favorites.map((t) => t.key));
   syncHearts();
   toast(r.added ? "Додано в улюблене" : "Прибрано з улюбленого", [], 2200);
@@ -1539,6 +1832,7 @@ async function play(track, list) {
     .catch(() => {});
   $("#plTitle").textContent = track.title;
   $("#plArtist").textContent = track.artist || "невідомий виконавець";
+  $("#plArtist").classList.toggle("alink", Boolean(track.artist));
   $("#plArt").src = track.thumb || BLANK;
   $("#player").classList.remove("idle");
   $("#plPlay").disabled = false;
@@ -1546,6 +1840,7 @@ async function play(track, list) {
   syncNavBtns();
   pushMediaSession();
   renderQueuePanel();
+  pushSession();
 
   if (track.path) {
     audio.src = fileUrl(track.path);
@@ -1565,6 +1860,7 @@ async function play(track, list) {
       streamRetried = false;
       audio.src = url;
       $("#plArtist").textContent = track.artist || "невідомий виконавець";
+  $("#plArtist").classList.toggle("alink", Boolean(track.artist));
     } catch (e) {
       if (trackKey(state.playing) !== trackKey(track)) return;
       $("#plArtist").textContent = track.artist || "";
@@ -1772,6 +2068,7 @@ function queueDrop(i) {
   if (i <= state.pq.i) state.pq.i--;
   renderQueuePanel();
   syncNavBtns();
+  pushSession();
 }
 
 /** @param {number} i звідки  @param {number} d -1 вище, +1 нижче */
@@ -1785,6 +2082,7 @@ function queueMove(i, d) {
   else if (state.pq.i === j) state.pq.i = i;
   renderQueuePanel();
   syncNavBtns();
+  pushSession();
 }
 
 /** Вставляє трек одразу після поточного — класичне «грати наступним». */
@@ -1795,8 +2093,86 @@ function playNext(track) {
   state.pq.list.splice(state.pq.i + 1, 0, track);
   renderQueuePanel();
   syncNavBtns();
+  pushSession();
   toast(`«${track.title}» гратиме наступним`, [], 2500);
 }
+
+// ------------------------------------------------------------------ сеанс
+
+/**
+ * Пересилання черги головному процесу.
+ *
+ * Вікно смертне: воно може впасти, і тоді разом з ним зникне черга на сорок
+ * треків, набрана з радіо. Головний процес переживе це й поверне її назад.
+ *
+ * Притлумлюємо за часом: черга змінюється на кожне «грати наступним» і кожне
+ * переставляння, а позиція — двадцять разів на секунду.
+ */
+let sessionTimer = null;
+
+function saveSession() {
+  if (!state.pq.list.length) return;
+  window.api
+    .sessionSave({
+      list: state.pq.list,
+      i: state.pq.i,
+      position: Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
+    })
+    .catch(() => {});
+}
+
+/** Зміна складу черги — з невеликою затримкою, щоб десять правок поспіль дали один запис. */
+function pushSession() {
+  clearTimeout(sessionTimer);
+  sessionTimer = setTimeout(saveSession, 1500);
+}
+
+// Позиція оновлюється двадцять разів на секунду, тож затримка тут не годиться:
+// її скидало б швидше, ніж вона встигала спрацювати. Пишемо просто нечасто.
+setInterval(() => {
+  if (state.playing && !audio.paused) saveSession();
+}, 15000);
+
+/**
+ * Повертає те, що грало, — після падіння вікна або після запуску програми.
+ *
+ * ЗАВЖДИ НА ПАУЗІ, і це не обережність заради обережності: якщо вікно впало
+ * саме на цьому потоці, автоматичне продовження відтворило б падіння одразу
+ * після перезавантаження.
+ */
+async function restoreSession() {
+  let s = null;
+  try {
+    s = await window.api.sessionRestore();
+  } catch {
+    return;
+  }
+  if (!s?.list?.length) return;
+
+  const track = s.list[s.i] || s.list[0];
+  if (!track) return;
+
+  state.pq = { list: s.list, i: s.list.indexOf(track) };
+  state.playing = track;
+
+  $("#plTitle").textContent = track.title;
+  $("#plArtist").textContent = track.artist || "невідомий виконавець";
+  $("#plArtist").classList.toggle("alink", Boolean(track.artist));
+  $("#plArt").src = track.thumb || track.thumbUrl || BLANK;
+  $("#player").classList.remove("idle");
+  $("#plPlay").disabled = false;
+  $("#plSeek").disabled = false;
+  syncNavBtns();
+
+  // Джерело звуку навмисно не готуємо: воно коштує кілька секунд і походу в
+  // мережу, а людина могла й не збиратись продовжувати. Візьмемо його з
+  // першим натисканням — play() уміє це сам.
+  pendingSeek = Number(s.position) || 0;
+  $("#plNow").textContent = dur(pendingSeek);
+}
+
+/** Секунда, на яку треба перемотати, щойно з'явиться тривалість треку. */
+let pendingSeek = 0;
 
 // ------------------------------------------------------------------ система
 
@@ -1862,7 +2238,7 @@ function setupMediaKeys() {
     }
   };
 
-  set("play", () => audio.play().catch(() => {}));
+  set("play", togglePlay);
   set("pause", () => audio.pause());
   set("stop", stopPlayback);
   set("previoustrack", () => {
@@ -1938,6 +2314,12 @@ audio.addEventListener("ended", () => {
 });
 audio.addEventListener("loadedmetadata", () => {
   $("#plEnd").textContent = dur(audio.duration);
+
+  // Відновлений сеанс: перемотуємо туди, де зупинились. Тільки тепер — до
+  // появи тривалості перемотка нікуди не веде.
+  if (pendingSeek > 0 && pendingSeek < audio.duration) audio.currentTime = pendingSeek;
+  pendingSeek = 0;
+
   pushDiscord();
   pushPosition();
 });
@@ -1977,7 +2359,21 @@ audio.addEventListener("error", async () => {
   );
 });
 
-$("#plPlay").addEventListener("click", () => (audio.paused ? audio.play() : audio.pause()));
+/**
+ * Пробіл і кнопка в плеєрі.
+ *
+ * Після відновленого сеансу трек уже показаний, але джерела звуку ще немає —
+ * ми навмисно не ходили по нього в мережу, доки людина не попросила. Тому
+ * перше натискання не «продовжує», а вмикає по-справжньому.
+ */
+function togglePlay() {
+  if (!state.playing) return;
+  if (!audio.src) return play(state.playing);
+  if (audio.paused) audio.play().catch(() => {});
+  else audio.pause();
+}
+
+$("#plPlay").addEventListener("click", togglePlay);
 $("#plPrev").addEventListener("click", () => playAt(state.pq.i - 1));
 $("#plNext").addEventListener("click", () => {
   const n = nextIndex(false);
@@ -1991,6 +2387,12 @@ $("#plRadio").addEventListener("click", () => {
   if (!id) return toast("Радіо будується лише за треками YouTube Music.");
   startRadio({ ...t, id, source: "ytmusic" });
 });
+// Виконавець під назвою в плеєрі — теж шлях на його сторінку.
+$("#plArtist").addEventListener("click", () => {
+  const t = state.playing;
+  if (t?.artist) openArtistOf({ id: t.artistId, name: t.artist });
+});
+
 $("#plLyrics").addEventListener("click", toggleLyrics);
 $("#plQueue").addEventListener("click", toggleQueuePanel);
 $("#queueClose").addEventListener("click", () => ($("#queuePanel").hidden = true));
@@ -2021,7 +2423,7 @@ document.addEventListener("keydown", (e) => {
 
   if (e.code === "Space") {
     e.preventDefault();
-    if (state.playing) (audio.paused ? audio.play() : audio.pause());
+    togglePlay();
     return;
   }
   if (e.code === "ArrowRight" && audio.duration) {
@@ -2079,222 +2481,298 @@ $$(".tab").forEach((t) =>
   }),
 );
 
+/**
+ * Дії, розвішані на розмітці.
+ *
+ * Раніше це був один обробник із ланцюгом більш ніж на сорок гілок
+ * `if (act === "…")`. Кожна нова кнопка дописувала гілку в середину, а
+ * помилка в порядку гілок мовчала — дія просто ніколи не спрацьовувала.
+ *
+ * Тепер кожна дія — запис у таблиці: усі видно одразу, нову додати означає
+ * дописати рядок, а не влізти в чужий ланцюг. Порядок записів не має значення.
+ *
+ * Обробник отримує вже розібраний контекст: для Шукача це ключ рядка, для
+ * Сховища — шлях і сам трек, для черги завантажень — завдання.
+ */
+const ACTIONS = {
+  pick: ({ el, key }) => togglePick(key, el.checked),
+
+  listen: ({ key }) => {
+    // Слухаємо прямо з результатів пошуку, нічого не завантажуючи.
+    const queue = (state.results[state.tab] || []).filter((s) => s.kind === "song" && s.url);
+    play(index.get(key), queue.length ? queue : undefined);
+  },
+
+  "artist-of": ({ el }) => openArtistOf({ id: el.dataset.id, name: el.dataset.name }),
+  "artist-play": ({ el }) => playArtist(el.dataset.mode),
+
+  "album-of": ({ el }) => {
+    const name = el.dataset.name;
+    if (el.dataset.where === "local") return showLocalAlbum(name);
+
+    toSearchPage();
+    // Ідентифікатор альбому є лише в треків YouTube Music. Решті лишається
+    // пошук за «виконавець + назва» — тим самим шляхом, яким відкриваються
+    // альбоми з каталогів iTunes та MusicBrainz.
+    openAlbum(
+      el.dataset.id
+        ? { kind: "album", source: "ytmusic", id: el.dataset.id, title: name }
+        : { kind: "album", source: "catalog", title: name, artist: el.dataset.artist || "" },
+    );
+  },
+  playnext: ({ key }) => playNext(index.get(key)),
+  toplaylist: ({ key }) => openPlModal([index.get(key)]),
+  radio: ({ key }) => startRadio(index.get(key)),
+  "dl-one": ({ key }) => enqueue([index.get(key)]),
+  "dl-album": ({ key }) => enqueue([index.get(key)]),
+  "open-album": ({ key }) => openAlbum(index.get(key)),
+  "open-artist": ({ key }) => openArtist(index.get(key)),
+  "open-artist-id": ({ el }) => openArtistById(el.dataset.id),
+
+  back: () => {
+    state.view = { type: "results" };
+    render();
+  },
+
+  "pick-all": () => {
+    mainEl.querySelectorAll('.row input[data-act="pick"]:not(:disabled)').forEach((cb) => {
+      if (cb.checked) return;
+      cb.checked = true;
+      togglePick(cb.closest(".row").dataset.key, true);
+    });
+  },
+};
+
+/** Кнопки Сховища. Контекст: шлях до файлу й сам трек. */
+const LIB_ACTIONS = {
+  pick: ({ el, path }) => {
+    if (el.checked) state.libPicked.add(path);
+    else state.libPicked.delete(path);
+    el.closest(".row").classList.toggle("sel", el.checked);
+    refreshSelbar();
+  },
+
+  play: ({ track }) => {
+    // Черга — увесь видимий список, щоб працювали ⏭ і автоперехід.
+    const pl = state.openPl ? state.playlists.find((x) => x.id === state.openPl) : null;
+    play(track, pl ? plTracks(pl) : state.library.tracks);
+  },
+
+  playnext: ({ track }) => playNext(track),
+  toplaylist: ({ track }) => openPlModal([track]),
+  tags: ({ path }) => openTagEditor([path]),
+  reveal: ({ path }) => window.api.reveal(path),
+
+  trash: ({ path, track }) => {
+    if (!confirm(`Перемістити «${track.title}» у кошик?`)) return;
+    window.api
+      .libTrash(path)
+      .then(() => {
+        state.library.tracks = state.library.tracks.filter((t) => t.path !== path);
+        render();
+      })
+      .catch((err) => toast("Не вдалося: " + err.message));
+  },
+};
+
+/** Черга завантажень. */
+const JOB_ACTIONS = {
+  cancel: ({ el }) => window.api.dlCancel(el.dataset.id),
+  retry: ({ el }) => window.api.dlRetry(el.dataset.id),
+  reveal: ({ job }) => {
+    if (job?.files[0]) window.api.reveal(job.files[0]);
+  },
+};
+
+/** Головна: добірки та історія. */
+const HOME_ACTIONS = {
+  mix: ({ el }) => openMix(el.dataset.id, el.dataset.title),
+
+  histclear: () => {
+    if (!confirm("Очистити історію прослуханого?")) return;
+    window.api.histClear().then(() => {
+      state.history = [];
+      render();
+    });
+  },
+
+  histplay: ({ el }) => {
+    const t = state.history.find((x) => x.key === el.closest("[data-hist]")?.dataset.hist);
+    if (!t) return;
+    // Локальний файл беремо зі Сховища — у ньому свіжі теги й тривалість.
+    const local = t.path && state.library.tracks.find((x) => x.path === t.path);
+    play(local || t, state.history);
+  },
+
+  homeback: () => {
+    state.view = { type: "empty" };
+    render();
+  },
+
+  playmix: () => {
+    const list = state.mixTracks || [];
+    if (list.length) play(list[0], list);
+  },
+
+  grabmix: () => {
+    if (!state.mixId) return;
+    // Одним завданням, а не півсотнею окремих: так yt-dlp качає список
+    // послідовно, показує «трек X з Y» і складає все в теку добірки.
+    enqueue([
+      {
+        kind: "album",
+        title: state.mixTitle || "Добірка",
+        artist: "",
+        thumb: state.mixTracks?.[0]?.thumb || null,
+        url: `https://music.youtube.com/playlist?list=${state.mixId}`,
+      },
+    ]);
+  },
+};
+
+/** Плейлисти. Контекст: ідентифікатор плейлиста з самої кнопки. */
+const PL_ACTIONS = {
+  back: () => {
+    state.openPl = null;
+    render();
+  },
+
+  open: ({ id }) => {
+    state.openPl = id;
+    render();
+  },
+
+  new: () =>
+    askText({ title: "Новий плейлист", label: "Назва", ok: "Створити" }).then(async (name) => {
+      if (!name) return;
+      state.playlists = await window.api.plCreate(name);
+      render();
+      toast(`Плейлист «${name}» створено. Додавай треки кнопкою «У плейлист» у Сховищі.`, [], 6000);
+    }),
+
+  rename: ({ id }) => {
+    const cur = state.playlists.find((p) => p.id === id);
+    return askText({ title: "Перейменувати", label: "Назва", value: cur?.name || "" }).then(async (name) => {
+      if (!name) return;
+      state.playlists = await window.api.plRename(id, name);
+      render();
+    });
+  },
+
+  delete: ({ id }) => {
+    const cur = state.playlists.find((p) => p.id === id);
+    if (!confirm(`Видалити плейлист «${cur?.name}»? Самі файли лишаться на диску.`)) return;
+    window.api.plRemove(id).then((list) => {
+      state.playlists = list;
+      state.openPl = null;
+      render();
+    });
+  },
+
+  drop: ({ el, id }) => {
+    const key = el.closest("[data-pkey]")?.dataset.pkey;
+    // З улюбленого прибирають тим самим сердечком, а не окремим списком:
+    // інакше трек зник би зі списку, а сердечко на ньому лишилось залитим.
+    if (id === FAV_ID) {
+      const t = (state.favTracks || []).find((x) => (trackKey(x) || x.key) === key);
+      return toggleFav(t).then(render);
+    }
+    window.api.plRemoveTrack(id, key).then((list) => {
+      state.playlists = list;
+      render();
+    });
+  },
+
+  plplay: ({ el }) => {
+    const key = el.closest("[data-pkey]")?.dataset.pkey;
+    const list = plTracks(plById(state.openPl));
+    const t = list.find((x) => (trackKey(x) || x.key) === key);
+    if (t && !t.missing) play(t, list.filter((x) => !x.missing));
+  },
+
+  plgrab: () => {
+    const list = plTracks(plById(state.openPl));
+    const need = list.filter((t) => !t.path && t.url);
+    if (!need.length) return toast("Усі треки цього плейлиста вже на диску.");
+    const have = list.length - need.length;
+    enqueue(need);
+    if (have) toast(`Пропущено ${plural(have, TRACKS)} — вони вже на диску.`, [], 5000);
+  },
+
+  playall: ({ id }) => {
+    const list = plTracks(plById(id || state.openPl)).filter((t) => !t.missing);
+    if (list.length) play(list[0], list);
+  },
+};
+PL_ACTIONS.playpl = PL_ACTIONS.playall;
+
+/**
+ * Групи дій: атрибут у розмітці, таблиця й спосіб зібрати для неї контекст.
+ * Порядок важить лише тим, що перша знайдена група забирає клік собі.
+ */
+const ACTION_GROUPS = [
+  {
+    attr: "act",
+    table: ACTIONS,
+    ctx: (el) => ({ el, key: el.closest("[data-key]")?.dataset.key }),
+  },
+  {
+    attr: "lact",
+    table: LIB_ACTIONS,
+    ctx: (el) => {
+      const path = el.closest("[data-path]")?.dataset.path;
+      const track = state.library.tracks.find((t) => t.path === path);
+      // Рядок міг зникнути між малюванням і кліком — тоді робити нічого.
+      return track ? { el, path, track } : null;
+    },
+  },
+  { attr: "jact", table: JOB_ACTIONS, ctx: (el) => ({ el, job: state.jobs.get(el.dataset.id) }) },
+  { attr: "hact", table: HOME_ACTIONS, ctx: (el) => ({ el }) },
+  { attr: "plact", table: PL_ACTIONS, ctx: (el) => ({ el, id: el.dataset.id }) },
+];
+
+/** Кнопки, які впізнаються за ідентифікатором, а не за дією. */
+const BY_ID = {
+  qOpen: () => window.api.openFolder(state.settings.outDir),
+  libOpen: () => window.api.openFolder(state.settings.outDir),
+  libRescan: () => loadLibrary(true),
+  folderBtn: () => chooseFolder(),
+  qClear: () =>
+    window.api.dlClear().then((left) => {
+      state.jobs = new Map(left.map((j) => [j.id, j]));
+      refreshQueueBadge();
+      render();
+    }),
+};
+
 mainEl.addEventListener("click", (e) => {
-  // --- кнопки з data-act (Шукач) ---
-  const btn = e.target.closest("[data-act]");
-  if (btn) {
-    const act = btn.dataset.act;
-    const rowKey = btn.closest("[data-key]")?.dataset.key;
-    if (act === "pick") return togglePick(rowKey, btn.checked);
-    if (act === "listen") {
-      // Слухаємо прямо з результатів пошуку, нічого не завантажуючи.
-      const it = index.get(rowKey);
-      const queue = (state.results[state.tab] || []).filter((s) => s.kind === "song" && s.url);
-      return play(it, queue.length ? queue : undefined);
-    }
-    if (act === "playnext") return playNext(index.get(rowKey));
-    if (act === "toplaylist") return openPlModal([index.get(rowKey)]);
-    if (act === "radio") return startRadio(index.get(rowKey));
-    if (act === "dl-one") return enqueue([index.get(rowKey)]);
-    if (act === "dl-album") return enqueue([index.get(btn.dataset.key)]);
-    if (act === "open-album") return openAlbum(index.get(btn.dataset.key));
-    if (act === "open-artist") return openArtist(index.get(btn.dataset.key));
-    if (act === "open-artist-id") return openArtistById(btn.dataset.id);
-    if (act === "back") {
-      state.view = { type: "results" };
-      return render();
-    }
-    if (act === "pick-all") {
-      mainEl.querySelectorAll('.row input[data-act="pick"]:not(:disabled)').forEach((cb) => {
-        if (!cb.checked) {
-          cb.checked = true;
-          togglePick(cb.closest(".row").dataset.key, true);
-        }
-      });
-      return;
-    }
-  }
-
-  // --- кнопки Сховища ---
-  const lb = e.target.closest("[data-lact]");
-  if (lb) {
-    const p = lb.closest("[data-path]")?.dataset.path;
-    const track = state.library.tracks.find((t) => t.path === p);
-    if (!track) return;
-    if (lb.dataset.lact === "pick") {
-      if (lb.checked) state.libPicked.add(p);
-      else state.libPicked.delete(p);
-      lb.closest(".row").classList.toggle("sel", lb.checked);
-      refreshSelbar();
-      return;
-    }
-    if (lb.dataset.lact === "playnext") return playNext(track);
-    if (lb.dataset.lact === "toplaylist") return openPlModal([track]);
-    if (lb.dataset.lact === "tags") return openTagEditor([p]);
-    if (lb.dataset.lact === "play") {
-      // Черга — увесь видимий список, щоб працювали ⏭ і автоперехід.
-      const pl = state.openPl ? state.playlists.find((x) => x.id === state.openPl) : null;
-      return play(track, pl ? plTracks(pl) : state.library.tracks);
-    }
-    if (lb.dataset.lact === "reveal") return window.api.reveal(p);
-    if (lb.dataset.lact === "trash") {
-      if (!confirm(`Перемістити «${track.title}» у кошик?`)) return;
-      return window.api
-        .libTrash(p)
-        .then(() => {
-          state.library.tracks = state.library.tracks.filter((t) => t.path !== p);
-          render();
-        })
-        .catch((err) => toast("Не вдалося: " + err.message));
-    }
-  }
-
-  // --- черга ---
-  const jb = e.target.closest("[data-jact]");
-  if (jb) {
-    const job = state.jobs.get(jb.dataset.id);
-    if (jb.dataset.jact === "cancel") return window.api.dlCancel(jb.dataset.id);
-    if (jb.dataset.jact === "retry") return window.api.dlRetry(jb.dataset.id);
-    if (jb.dataset.jact === "reveal" && job?.files[0]) return window.api.reveal(job.files[0]);
-  }
-
-  // --- серце: працює однаково для файлів і для треків із пошуку ---
-  const fb = e.target.closest("[data-fav]");
-  if (fb) {
-    const row = fb.closest("[data-key],[data-path]");
+  // Серце окремо: це не дія зі своїм іменем, а той самий перемикач, який
+  // малюється і в рядках пошуку, і в рядках Сховища. Трек для нього
+  // знаходиться по-різному, тож і контекст у нього свій.
+  const fav = e.target.closest("[data-fav]");
+  if (fav) {
+    const row = fav.closest("[data-key],[data-path]");
     const t = row?.dataset.path
       ? state.library.tracks.find((x) => x.path === row.dataset.path)
       : index.get(row?.dataset.key);
     return toggleFav(t);
   }
 
-  // --- головна ---
-  const hb = e.target.closest("[data-hact]");
-  if (hb) {
-    if (hb.dataset.hact === "mix") return openMix(hb.dataset.id, hb.dataset.title);
-    if (hb.dataset.hact === "histclear") {
-      if (!confirm("Очистити історію прослуханого?")) return;
-      return window.api.histClear().then(() => {
-        state.history = [];
-        render();
-      });
-    }
-    if (hb.dataset.hact === "histplay") {
-      const key = hb.closest("[data-hist]")?.dataset.hist;
-      const t = state.history.find((x) => x.key === key);
-      if (!t) return;
-      // Локальний файл беремо зі Сховища — у ньому свіжі теги й тривалість.
-      const local = t.path && state.library.tracks.find((x) => x.path === t.path);
-      return play(local || t, state.history);
-    }
-    if (hb.dataset.hact === "homeback") {
-      state.view = { type: "empty" };
-      return render();
-    }
-    if (hb.dataset.hact === "playmix") {
-      const list = state.mixTracks || [];
-      if (list.length) play(list[0], list);
-      return;
-    }
-    if (hb.dataset.hact === "grabmix") {
-      if (!state.mixId) return;
-      // Одним завданням, а не півсотнею окремих: так yt-dlp качає список
-      // послідовно, показує «трек X з Y» і складає все в теку добірки.
-      return enqueue([
-        {
-          kind: "album",
-          title: state.mixTitle || "Добірка",
-          artist: "",
-          thumb: state.mixTracks?.[0]?.thumb || null,
-          url: `https://music.youtube.com/playlist?list=${state.mixId}`,
-        },
-      ]);
-    }
+  for (const group of ACTION_GROUPS) {
+    const el = e.target.closest(`[data-${group.attr}]`);
+    if (!el) continue;
+    const ctx = group.ctx(el);
+    const run = group.table[el.dataset[group.attr]];
+    if (ctx && run) run(ctx);
+    // Навіть коли дії з таким іменем немає, клік уже з'їдений кнопкою:
+    // нижче він не має ще й вмикати рядок.
+    return;
   }
 
-  // --- плейлисти ---
-  const pb = e.target.closest("[data-plact]");
-  if (pb) {
-    const act = pb.dataset.plact;
-    const id = pb.dataset.id;
-    if (act === "back") {
-      state.openPl = null;
-      return render();
-    }
-    if (act === "open") {
-      state.openPl = id;
-      return render();
-    }
-    if (act === "new") {
-      return askText({ title: "Новий плейлист", label: "Назва", ok: "Створити" }).then(async (name) => {
-        if (!name) return;
-        state.playlists = await window.api.plCreate(name);
-        render();
-        toast(`Плейлист «${name}» створено. Додавай треки кнопкою «У плейлист» у Сховищі.`, [], 6000);
-      });
-    }
-    if (act === "rename") {
-      const cur = state.playlists.find((p) => p.id === id);
-      return askText({ title: "Перейменувати", label: "Назва", value: cur?.name || "" }).then(async (name) => {
-        if (!name) return;
-        state.playlists = await window.api.plRename(id, name);
-        render();
-      });
-    }
-    if (act === "delete") {
-      const cur = state.playlists.find((p) => p.id === id);
-      if (!confirm(`Видалити плейлист «${cur?.name}»? Самі файли лишаться на диску.`)) return;
-      return window.api.plRemove(id).then((list) => {
-        state.playlists = list;
-        state.openPl = null;
-        render();
-      });
-    }
-    if (act === "drop") {
-      const key = pb.closest("[data-pkey]")?.dataset.pkey;
-      return window.api.plRemoveTrack(id, key).then((list) => {
-        state.playlists = list;
-        render();
-      });
-    }
-    if (act === "plplay") {
-      const key = pb.closest("[data-pkey]")?.dataset.pkey;
-      const list = plTracks(state.playlists.find((p) => p.id === state.openPl));
-      const t = list.find((x) => (trackKey(x) || x.key) === key);
-      if (t && !t.missing) play(t, list.filter((x) => !x.missing));
-      return;
-    }
-    if (act === "plgrab") {
-      const pl = state.playlists.find((p) => p.id === state.openPl);
-      const list = plTracks(pl);
-      const need = list.filter((t) => !t.path && t.url);
-      if (!need.length) return toast("Усі треки цього плейлиста вже на диску.");
-      const have = list.length - need.length;
-      enqueue(need);
-      if (have) toast(`Пропущено ${plural(have, TRACKS)} — вони вже на диску.`, [], 5000);
-      return;
-    }
-    if (act === "playall" || act === "playpl") {
-      const pl = state.playlists.find((p) => p.id === (id || state.openPl));
-      const list = plTracks(pl);
-      if (list.length) play(list[0], list);
-      return;
-    }
-  }
-
-  if (e.target.id === "qOpen" || e.target.id === "libOpen")
-    return window.api.openFolder(state.settings.outDir);
-  if (e.target.id === "qClear")
-    return window.api.dlClear().then((left) => {
-      state.jobs = new Map(left.map((j) => [j.id, j]));
-      refreshQueueBadge();
-      render();
-    });
-  if (e.target.id === "libRescan") return loadLibrary(true);
-  if (e.target.id === "folderBtn" || e.target.closest("#folderBtn")) return chooseFolder();
+  const byId = e.target.closest("#qOpen,#libOpen,#qClear,#libRescan,#folderBtn");
+  if (byId) return BY_ID[byId.id]();
 
   // --- клік по рядку треку вмикає галочку, по рядку Сховища — програвання ---
-  if (btn || lb || jb || pb || hb || fb) return;
 
   // Клік по рядку історії — просто вмикає його.
   const histRowEl = e.target.closest("[data-hist]");
@@ -2569,10 +3047,31 @@ window.api.onClipboardLink((url) => {
   // поведінки (щось раптом знову качається) виглядає випадковою.
   window.api.onYtdlpUpdated((r) => toast(`yt-dlp оновлено до ${r.version}`, [], 5000));
 
+  // Якщо якийсь із файлів не прочитався, людина мусить про це знати одразу.
+  // Мовчазний старт «з чистого аркуша» — це втрата, яку не помічають.
+  window.api
+    .troubles()
+    .then((bad) => {
+      if (!bad.length) return;
+      const what = bad.map((b) => b.name).join(", ");
+      toast(
+        `Не вдалося прочитати: ${what}. Програма почала з порожнього, ` +
+          `але старий файл не стерто — він лежить поруч із приміткою «.broken».`,
+        [{ label: "Показати теку", run: () => window.api.reveal(bad[0].backup) }],
+        0,
+      );
+    })
+    .catch(() => {});
+
+  // Те, що грало минулого разу, — на паузі. Робимо це до читання Сховища:
+  // плеєр має бути на місці одразу, а не через кілька секунд.
+  await restoreSession();
+
   state.jobs = new Map((await window.api.dlList()).map((j) => [j.id, j]));
   refreshQueueBadge();
   await loadPlaylists();
-  state.favs = new Set((await window.api.favList()).map((t) => t.key));
+  state.favTracks = await window.api.favList();
+  state.favs = new Set(state.favTracks.map((t) => t.key));
   state.history = await window.api.histList();
   render();
   loadHome();

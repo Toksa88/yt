@@ -15,6 +15,9 @@ async function call(channel, ...args) {
 
 contextBridge.exposeInMainWorld("api", {
   binaries: () => call("binaries:status"),
+  troubles: () => call("app:troubles"),
+  sessionSave: (state) => call("session:save", state),
+  sessionRestore: () => call("session:restore"),
   ytdlpCheck: () => call("tools:ytdlpCheck"),
   ytdlpUpdate: () => call("tools:ytdlpUpdate"),
   onYtdlpUpdated: (cb) => ipcRenderer.on("tools:ytdlp", (_e, r) => cb(r)),
@@ -24,6 +27,7 @@ contextBridge.exposeInMainWorld("api", {
   searchSoundcloud: (query, searchId) => call("search:soundcloud", query, searchId),
   album: (id) => call("search:album", id),
   artist: (id) => call("search:artist", id),
+  artistByName: (name) => call("search:artistByName", name),
   resolveCatalog: (item) => call("search:resolveCatalog", item),
   mbReleases: (mbid) => call("search:mbReleases", mbid),
 

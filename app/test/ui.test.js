@@ -605,6 +605,47 @@ function connect(url) {
       syncNavBtns();
       return true;`);
 
+    // Від треку до всього іншого, що цей виконавець записав: раніше ім'я було
+    // просто текстом, і доводилось копіювати його назад у пошук.
+    console.log("\n[10b3] Перехід на сторінку виконавця");
+    await evalJs(`document.querySelector('.navbtn[data-page=library]').click(); return true`);
+    await until(`return document.querySelector('.row[data-path] .alink') ? true : null`, 20, 400);
+    check("ім'я виконавця у Сховищі клікабельне", (await evalJs(`
+      const a = document.querySelector('.row[data-path] .alink');
+      return a ? a.textContent : null;`)) === "Kevin MacLeod");
+    await evalJs(`document.querySelector('.row[data-path] .alink').click(); return true`);
+    const artist = await until(`
+      const h = document.querySelector('.detail-head.artist h1');
+      return h ? { name: h.textContent, page: state.page, songs: document.querySelectorAll('.rows .row').length } : null;`,
+      30, 700);
+    check("сторінка виконавця відкрилась", artist?.name === "Kevin MacLeod", artist?.name || "не дочекались");
+    check("вона показує його треки", artist?.songs > 0, `${artist?.songs} треків`);
+    // Сторінки виконавця живуть у «Шукачі»: інакше вона намалювалась би й
+    // зникла з наступним перемальовуванням Сховища.
+    check("розділ перемкнувся на Шукач", artist?.page === "search", artist?.page);
+    await shot("виконавець-із-файлу");
+
+    // Сторінка виконавця показувала треки, але зібрати з них чергу можна було
+    // лише поклацавши кожен окремо.
+    check("на сторінці виконавця є з чого почати", (await evalJs(`
+      return [...document.querySelectorAll('[data-act="artist-play"]')].map(b => b.dataset.mode).join(',');`))
+      === "top,shuffle,all");
+
+    await evalJs(`document.querySelector('[data-act="artist-play"][data-mode=top]').click(); return true`);
+    const top = await until(`
+      return state.pq.list.length ? { n: state.pq.list.length, first: state.pq.list[0]?.title } : null;`, 20, 400);
+    check("«Слухати популярні» збирає чергу", top?.n > 1, `${top?.n} треків`);
+
+    const order = await evalJs(`
+      const before = state.pq.list.map(t => t.title).join('|');
+      document.querySelector('[data-act="artist-play"][data-mode=shuffle]').click();
+      await new Promise(r => setTimeout(r, 600));
+      return { before, after: state.pq.list.map(t => t.title).join('|'), shuffle: state.shuffle };`);
+    check("«Перемішати» справді міняє порядок", order?.before !== order?.after);
+    // Інакше після кінця перемішаного списку порядок раптом ставав би звичайним.
+    check("і вмикає сам режим перемішування", order?.shuffle === true);
+    check("черга не загубилась", (await evalJs("return state.pq.list.length")) === top?.n, String(top?.n));
+
     console.log("\n[10c] Позначка «вже є» в пошуку");
     await evalJs(`
       document.querySelector('.navbtn[data-page=search]').click();
@@ -782,6 +823,25 @@ function connect(url) {
       const rows = document.querySelectorAll('.row[data-hist]');
       return rows.length ? { n: rows.length } : null;`, 20, 400);
     check("«нещодавно слухав» на Головній", histShown?.n > 0, `${histShown?.n} рядків`);
+
+    // YouTube Music віддає нам головну «нізвідки»: ми ходимо до нього без
+    // облікового запису. Єдине, що знає саме про цього користувача, — його
+    // історія на цьому комп'ютері, і з неї збираються персональні добірки.
+    await evalJs(`state.home.loaded = false; loadHome(true); return true`);
+    const personal = await until(`
+      if (state.home.loading) return null;
+      const titles = [...document.querySelectorAll('.sec')].map(h => h.textContent);
+      const mine = state.home.personal || [];
+      return mine.length ? { titles, kinds: mine.map(s => s.songs ? 'треки' : 'виконавці') } : null;`, 25, 700);
+    check("персональні добірки зібрались", Boolean(personal), personal?.kinds?.join(", ") || "не дочекались");
+    check("є добірка «бо ти слухав»",
+      Boolean(personal?.titles?.some((t) => /Бо ти слухав/.test(t))),
+      personal?.titles?.find((t) => /Бо ти слухав/.test(t)) || "немає");
+    check("є список власних виконавців",
+      Boolean(personal?.titles?.some((t) => /Виконавці, яких ти слухаєш/.test(t))));
+    check("і на них можна натиснути", (await evalJs(`
+      return document.querySelectorAll('.card[data-act="artist-of"]').length;`)) > 0);
+    await shot("головна-персональна");
     await shot("головна-з-історією");
 
     console.log("\n[11c] Плейлисти");
@@ -876,6 +936,78 @@ function connect(url) {
 
     // Головне: у плейлист має лягати й те, що ще НЕ завантажене. Спершу тут
     // зберігались самі шляхи до файлів, і мережевий трек покласти було нікуди.
+    // Сердечко працювало від початку, а подивитись на вподобане не можна було
+    // ніде: у пам'яті лишались самі ключі, щоб заливати сердечка.
+    console.log("\n[11c3] Улюблене серед плейлистів");
+    await evalJs(`
+      document.querySelector('.navbtn[data-page=playlists]').click();
+      return true;`);
+    await sleep(500);
+    check("закріплена картка на місці", (await evalJs(`
+      const c = document.querySelector('.plcard.fav');
+      return c ? c.textContent.includes('Улюблене') : false;`)) === true);
+    check("вона стоїть першою", (await evalJs(`
+      return document.querySelectorAll('.plcard')[0].classList.contains('fav');`)) === true);
+
+    // Вподобаємо трек зі Сховища й перевіримо, що він туди доїхав.
+    await evalJs(`
+      document.querySelector('.navbtn[data-page=library]').click();
+      return true;`);
+    await until(`return document.querySelector('.row[data-path] [data-fav]') ? true : null`, 20, 400);
+    await evalJs(`document.querySelector('.row[data-path] [data-fav]').click(); return true`);
+    await until(`return state.favTracks && state.favTracks.length ? true : null`, 20, 300);
+
+    await evalJs(`
+      document.querySelector('.navbtn[data-page=playlists]').click();
+      document.querySelector('.plcard.fav [data-plact=open]').click();
+      return true;`);
+    const fav = await until(`
+      const rows = document.querySelectorAll('.row[data-pkey]');
+      return rows.length ? {
+        n: rows.length,
+        title: rows[0].querySelector('b').textContent,
+        rename: !!document.querySelector('[data-plact=rename]'),
+        del: !!document.querySelector('[data-plact=delete]'),
+      } : null;`, 20, 400);
+    check("вподобаний трек видно в Улюбленому", fav?.n > 0, `${fav?.n} треків`);
+    check("і це саме той трек", /Тест Назва|Cipher/.test(fav?.title || ""), fav?.title);
+    // Улюблене не створене людиною — перейменувати чи видалити його нічого.
+    check("перейменування там немає", fav?.rename === false);
+    check("видалення теж немає", fav?.del === false);
+
+    // Прибирати звідти має те саме сердечко, інакше трек зник би зі списку,
+    // а сердечко на ньому лишилось залитим.
+    await evalJs(`document.querySelector('.row[data-pkey] [data-plact=drop]').click(); return true`);
+    const emptied = await until(`return state.favTracks.length === 0 ? true : null`, 20, 300);
+    check("«Прибрати» знімає сердечко", emptied === true);
+    await shot("улюблене");
+
+    console.log("\n[11c4] Альбом як посилання");
+    await evalJs(`
+      document.querySelector('.navbtn[data-page=library]').click();
+      return true;`);
+    await until(`return document.querySelector('.row[data-path]') ? true : null`, 20, 400);
+    const albumCell = await evalJs(`
+      const a = document.querySelector('.row[data-path] .alb .alink');
+      return a ? { name: a.textContent, where: a.dataset.where } : null;`);
+    check("у Сховищі альбом клікабельний", Boolean(albumCell?.name), albumCell?.name || "немає");
+    check("і веде на диск, а не в мережу", albumCell?.where === "local", albumCell?.where);
+    if (albumCell) {
+      await evalJs(`document.querySelector('.row[data-path] .alb .alink').click(); return true`);
+      await sleep(600);
+      const filtered = await evalJs(`
+        return { page: state.page, filter: state.libFilter, box: document.querySelector('#libSearch')?.value };`);
+      check("Сховище звузилось до цього альбому", filtered?.filter === albumCell.name, filtered?.filter);
+      // Поле пошуку мусить показувати причину: інакше людина бачить урізаний
+      // список і не розуміє, куди поділась решта музики.
+      check("і в полі пошуку видно чому", filtered?.box === albumCell.name, filtered?.box);
+      await evalJs(`
+        const i = document.querySelector('#libSearch');
+        i.value = '';
+        i.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;`);
+    }
+
     console.log("\n[11c2] Незавантажений трек у плейлисті");
     await evalJs(`
       document.querySelector('.navbtn[data-page=search]').click();
@@ -1086,6 +1218,44 @@ function connect(url) {
       /^\d{4}\.\d{2}\.\d{2}/.test(ver?.latest || ""), ver?.err || `${ver?.current} → ${ver?.latest}`);
     check("перевірка оновлень не морозить вікно", ver?.idle < 1000, `звичайний виклик пройшов за ${ver?.idle} мс`);
     await shot("налаштування");
+
+    // Навмисно передостаннім: тут вікно перезавантажується по-справжньому, а
+    // це зносить усе, що набралось у пам'яті — результати пошуку, прочитане
+    // Сховище. Секції, що йдуть після, на цей стан спиратись не мають.
+    console.log("\n[12b] Сеанс переживає перезавантаження вікна");
+    await evalJs(`
+      state.pq = {
+        list: [1, 2, 3].map(n => ({ title: 'Сеанс ' + n, artist: 'Тест', url: 'https://example.invalid/' + n })),
+        i: 1,
+      };
+      await window.api.sessionSave({ list: state.pq.list, i: state.pq.i, position: 42 });
+      return true;`);
+    const kept = await evalJs("return await window.api.sessionRestore()");
+    check("стан доїхав до головного процесу", kept?.list?.length === 3, `${kept?.list?.length} треків`);
+    check("запам'яталось місце в черзі", kept?.i === 1, String(kept?.i));
+    check("і секунда, на якій зупинились", kept?.position === 42, String(kept?.position));
+
+    // Те саме, що робить головний процес після падіння вікна.
+    await cdp.send("Page.reload");
+    await sleep(2500);
+    const back = await until(`
+      return state.playing ? {
+        title: state.playing.title,
+        queue: state.pq.list.length,
+        paused: document.querySelector('#audio').paused,
+        idle: document.querySelector('#player').classList.contains('idle'),
+      } : null;`, 30, 500);
+    check("черга повернулась", back?.queue === 3, `${back?.queue} треків`);
+    check("і саме той трек, що грав", back?.title === "Сеанс 2", back?.title || "нічого");
+    check("плеєр не порожній", back?.idle === false);
+    // Найважливіше: якщо вікно впало саме на цьому потоці, автозапуск
+    // відтворив би падіння одразу після перезавантаження.
+    check("але музика не заграла сама", back?.paused === true);
+
+    await evalJs(`
+      await window.api.sessionSave({ list: [], i: -1, position: 0 });
+      stopPlayback();
+      return true;`);
 
     console.log("\n[13] Помилки в консолі інтерфейсу");
     check("без винятків і порушень CSP", errors.length === 0, [...new Set(errors)].slice(0, 2).join(" | "));
