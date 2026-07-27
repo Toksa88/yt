@@ -1203,6 +1203,28 @@ function connect(url) {
     check("масштаб інтерфейсу справді змінює розмір",
       zoomed?.after > zoomed?.before, `${zoomed?.before} → ${zoomed?.after}`);
     check("і запам'ятовується в налаштуваннях", zoomed?.saved === 1.5, String(zoomed?.saved));
+
+    // Масштаб зменшує ширину в CSS-пікселях: при 150% від вікна на 1180
+    // лишається 776. Панель плеєра цього колись не переживала — смужка
+    // перемотки з часом вилазили за свій блок просто поверх сусідніх кнопок,
+    // і час малювався сам на собі.
+    const spill = await evalJs(`
+      const w = document.documentElement.clientWidth;
+      const seen = (el) => el.getBoundingClientRect().width > 0;
+      const out = [...document.querySelectorAll('#player *')]
+        .filter(seen)
+        .filter((el) => el.getBoundingClientRect().right > w + 1)
+        .map((el) => el.id || el.className);
+      const seek = document.querySelector('.pseek');
+      return {
+        w,
+        заКрай: out,
+        зіСвогоБлоку: seek.scrollWidth > Math.ceil(seek.getBoundingClientRect().width),
+      };`);
+    check("на великому масштабі плеєр не вилазить за край вікна",
+      spill?.заКрай?.length === 0, `${spill?.w}px, вилізло: ${spill?.заКрай?.join(", ") || "нічого"}`);
+    check("і вміст смужки вміщається у свій блок", spill?.зіСвогоБлоку === false);
+
     await evalJs(`
       const sel = document.querySelector('#zoom');
       sel.value = '1';
