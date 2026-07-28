@@ -84,7 +84,9 @@ function connect(url) {
 
   fs.rmSync(PROFILE, { recursive: true, force: true });
 
-  const child = spawn(ELECTRON, [APP, `--remote-debugging-port=${PORT}`, `--user-data-dir=${PROFILE}`], {
+  // --mute-audio: тест справді програє музику, і слухати її щоразу нема
+  // потреби — перевіряються час і стан, а вони йдуть і без звуку.
+  const child = spawn(ELECTRON, [APP, "--mute-audio", `--remote-debugging-port=${PORT}`, `--user-data-dir=${PROFILE}`], {
     cwd: APP,
     env: { ...process.env, MG_DEBUG: "1" },
     stdio: ["ignore", "pipe", "pipe"],
@@ -650,8 +652,9 @@ function connect(url) {
     // може бути п'ять «своїх» треків при десятках записаних. Радіо — чесний
     // вихід із цього, і воно мусить давати помітно більше.
     await evalJs(`document.querySelector('[data-act="artist-play"][data-mode=radio]').click(); return true`);
+    // Радіо йде в YouTube Music, тож чекаємо на відповідь, а не на секундомір.
     const radio = await until(`
-      return state.pq.list.length > ${top?.n || 0} ? state.pq.list.length : null;`, 25, 700);
+      return state.pq.list.length > ${top?.n || 0} ? state.pq.list.length : null;`, 40, 1000);
     check("«Радіо» дає більшу чергу, ніж власні треки", radio > (top?.n || 0), `${radio} проти ${top?.n}`);
 
     console.log("\n[10c] Позначка «вже є» в пошуку");
@@ -1224,6 +1227,45 @@ function connect(url) {
     check("на великому масштабі плеєр не вилазить за край вікна",
       spill?.заКрай?.length === 0, `${spill?.w}px, вилізло: ${spill?.заКрай?.join(", ") || "нічого"}`);
     check("і вміст смужки вміщається у свій блок", spill?.зіСвогоБлоку === false);
+
+    // Те саме, але по всіх сторінках і на найбільшому масштабі, який програма
+    // взагалі дозволяє: при 200% від вікна лишається менш ніж 600 пікселів.
+    // Саме там ламались сітки рядків із жорсткими колонками під альбом.
+    const wide = await evalJs(`
+      const sel = document.querySelector('#zoom');
+      sel.value = '2';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 700));
+
+      // Обрізаний батьком елемент за краєм не видно, хай як далеко сягає його
+      // прямокутник: довгі назви навмисно ховаються під три крапки. Рахуємо
+      // лише те, що справді вилізе людині на очі.
+      const clipped = (el) => {
+        for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+          const o = getComputedStyle(p);
+          if (o.overflowX !== 'visible' || o.overflowY !== 'visible') return true;
+        }
+        return false;
+      };
+
+      const bad = [];
+      for (const page of ['home', 'search', 'queue', 'library', 'playlists', 'settings']) {
+        document.querySelector('.navbtn[data-page=' + page + ']').click();
+        await new Promise(r => setTimeout(r, 400));
+        const W = document.documentElement.clientWidth;
+        if (document.documentElement.scrollWidth > W + 1) bad.push(page + ': сторінка їде вбік');
+        for (const el of document.querySelectorAll('body *')) {
+          const b = el.getBoundingClientRect();
+          if (b.width < 1 || b.height < 1) continue;
+          if (b.right > W + 1 && !clipped(el)) {
+            bad.push(page + ': ' + (el.id || el.className) + ' за краєм');
+            break;
+          }
+        }
+      }
+      return { w: document.documentElement.clientWidth, bad };`);
+    check("на масштабі 200% жодна сторінка не їде вбік",
+      wide?.bad?.length === 0, `${wide?.w}px, ${wide?.bad?.join("; ") || "чисто"}`);
 
     await evalJs(`
       const sel = document.querySelector('#zoom');

@@ -901,7 +901,19 @@ async function startRadio(track) {
     reindex(list);
     // Сам трек попереду, далі рекомендації.
     const full = [track, ...list.filter((t) => t.id !== track.id)];
-    play(full[0], full);
+
+    if (trackKey(state.playing) === trackKey(full[0])) {
+      // Цей трек уже грає — і тоді play() сприйняв би виклик як «перемкнути
+      // паузу» й черги не замінив. Виходило, що натиснув «Радіо», а нічого
+      // не сталось. Ставимо чергу самі, не чіпаючи того, що звучить.
+      state.pq = { list: full, i: 0 };
+      syncNavBtns();
+      renderQueuePanel();
+      pushSession();
+    } else {
+      play(full[0], full);
+    }
+
     toast(`Радіо: ${plural(full.length, TRACKS)}`, [], 3500);
   } catch (e) {
     toast("Радіо не вийшло: " + e.message);
